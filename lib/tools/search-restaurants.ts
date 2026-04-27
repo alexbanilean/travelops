@@ -1,3 +1,10 @@
+import {
+  DATA_PROVENANCE_SYNTHETIC_DEMO,
+  computeOfferExpiresAtIso,
+  DEMO_OFFER_VALIDITY_HOURS,
+} from "@/lib/travel-data-provenance";
+import { googleMapsPlaceSearchUrl } from "@/lib/travel-source-urls";
+
 export interface RestaurantOption {
   name: string;
   cuisine: string;
@@ -8,9 +15,25 @@ export interface RestaurantOption {
   location: string;
   description: string;
   privateRoom: boolean;
+  sourceUrl: string;
+  sourceLabel: string;
+  priceQuotedAt: string;
+  offerExpiresAt: string;
+  dataProvenance: typeof DATA_PROVENANCE_SYNTHETIC_DEMO;
+  pricingContextNote: string;
 }
 
-const RESTAURANT_DATA: Record<string, RestaurantOption[]> = {
+type RestaurantSeed = Omit<
+  RestaurantOption,
+  | "sourceUrl"
+  | "sourceLabel"
+  | "priceQuotedAt"
+  | "offerExpiresAt"
+  | "dataProvenance"
+  | "pricingContextNote"
+>;
+
+const RESTAURANT_DATA: Record<string, RestaurantSeed[]> = {
   default: [
     {
       name: "The Grand Brasserie",
@@ -165,6 +188,10 @@ export function searchRestaurants(params: {
 }): RestaurantOption[] {
   const key = params.location.toLowerCase().split(",")[0].trim();
   const baseData = RESTAURANT_DATA[key] || RESTAURANT_DATA.default;
+  const quoted = new Date();
+  const priceQuotedAt = quoted.toISOString();
+  const offerExpiresAt = computeOfferExpiresAtIso(quoted);
+  const pricingContextNote = `Demo per-person estimate for ${params.participants} guests; not a live menu quote. Refresh within ~${DEMO_OFFER_VALIDITY_HOURS}h.`;
 
   return baseData
     .filter((r) => r.capacity >= params.participants)
@@ -175,5 +202,11 @@ export function searchRestaurants(params: {
     .map((r) => ({
       ...r,
       totalPrice: Math.round(r.pricePerPerson * params.participants),
+      sourceUrl: googleMapsPlaceSearchUrl(r.name, params.location),
+      sourceLabel: "Google Maps",
+      priceQuotedAt,
+      offerExpiresAt,
+      dataProvenance: DATA_PROVENANCE_SYNTHETIC_DEMO,
+      pricingContextNote,
     }));
 }

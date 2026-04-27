@@ -6,6 +6,8 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { splitAgentStreamPayload } from "@/lib/agent-stream-protocol";
 import {
   ArrowLeft,
   Brain,
@@ -19,7 +21,17 @@ import {
   Clock,
   RefreshCw,
   CheckCircle,
+  AlertTriangle,
+  ExternalLink,
+  Info,
+  Radar,
 } from "lucide-react";
+import { format } from "date-fns";
+
+interface ItinerarySource {
+  label: string;
+  url: string;
+}
 
 interface ItineraryItem {
   time: string;
@@ -28,6 +40,12 @@ interface ItineraryItem {
   description: string;
   estimatedCost: number;
   vendor?: string;
+  sources?: ItinerarySource[];
+  priceQuotedAt?: string;
+  offerExpiresAt?: string | null;
+  dataProvenance?: string;
+  pricingContextNote?: string;
+  trackingUrl?: string;
 }
 
 interface ItineraryDay {
@@ -41,6 +59,9 @@ interface Itinerary {
   days: ItineraryDay[];
   totalEstimatedCost: number;
   summary: string;
+  itineraryQuotedAt?: string;
+  dataProvenance?: string;
+  pricingTrustNote?: string;
 }
 
 interface Event {
@@ -64,12 +85,36 @@ const typeIcon = {
 };
 
 const typeColor = {
-  flight: "bg-blue-100 text-blue-700",
+  flight: "bg-primary/15 text-primary",
   hotel: "bg-purple-100 text-purple-700",
   restaurant: "bg-orange-100 text-orange-700",
   activity: "bg-green-100 text-green-700",
-  other: "bg-gray-100 text-gray-700",
+  other: "bg-muted text-foreground",
 };
+
+function safeHttpUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+
+function formatIsoUtc(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return format(d, "MMM d, yyyy HH:mm") + " UTC";
+}
+
+function isOfferStale(iso?: string | null): boolean {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+  return Date.now() > t;
+}
 
 function ToolCallBadge({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -78,10 +123,10 @@ function ToolCallBadge({ text }: { text: string }) {
 
   return (
     <div
-      className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs px-3 py-1.5 rounded-full cursor-pointer hover:bg-blue-100 transition-colors"
+      className="inline-flex items-center gap-1.5 bg-primary/10 border border-primary/30 text-primary text-xs px-3 py-1.5 rounded-full cursor-pointer hover:bg-primary/15 transition-colors"
       onClick={() => setExpanded(!expanded)}
     >
-      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+      <div className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-pulse flex-shrink-0" />
       <span className="font-mono">{display}</span>
       {isLong && (
         expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
@@ -93,27 +138,82 @@ function ToolCallBadge({ text }: { text: string }) {
 function ItineraryItemCard({ item }: { item: ItineraryItem }) {
   const Icon = typeIcon[item.type] || Sparkles;
   const color = typeColor[item.type] || typeColor.other;
+  const quotedLine = formatIsoUtc(item.priceQuotedAt);
+  const expiresLine = formatIsoUtc(item.offerExpiresAt ?? undefined);
+  const stale = isOfferStale(item.offerExpiresAt ?? undefined);
+  const trackingHref = item.trackingUrl ? safeHttpUrl(item.trackingUrl) : null;
 
   return (
-    <div className="flex gap-4 p-4 rounded-xl border border-gray-100 hover:border-gray-200 bg-white transition-colors">
+    <div className="flex gap-4 p-4 rounded-xl border border-border hover:border-border bg-card transition-colors">
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${color}`}>
         <Icon className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="flex items-center gap-2">
-              <Clock className="w-3 h-3 text-gray-400" />
-              <span className="text-xs text-gray-500">{item.time}</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Clock className="w-3 h-3 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">{item.time}</span>
+              {stale && (
+                <Badge variant="outline" className="text-xs border-amber-300 bg-amber-50 text-amber-900">
+                  Quote may be stale
+                </Badge>
+              )}
             </div>
-            <h4 className="font-semibold text-gray-900 mt-0.5">{item.name}</h4>
+            <h4 className="font-semibold text-foreground mt-0.5">{item.name}</h4>
             {item.vendor && (
-              <span className="text-xs text-blue-600 font-medium">{item.vendor}</span>
+              <span className="text-xs text-primary font-medium">{item.vendor}</span>
             )}
-            <p className="text-sm text-gray-600 mt-1 leading-relaxed">{item.description}</p>
+            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{item.description}</p>
+            {(quotedLine || expiresLine || item.pricingContextNote || item.dataProvenance) && (
+              <div className="mt-2 space-y-1 text-xs text-muted-foreground leading-relaxed">
+                {quotedLine && <p>Price snapshot: {quotedLine}</p>}
+                {expiresLine && (
+                  <p>
+                    Suggested re-check after: {expiresLine}
+                    {stale ? " — refresh prices before booking." : ""}
+                  </p>
+                )}
+                {item.pricingContextNote && <p>{item.pricingContextNote}</p>}
+                {item.dataProvenance && (
+                  <p className="font-mono text-[11px] opacity-90">Source: {item.dataProvenance}</p>
+                )}
+              </div>
+            )}
+            {item.sources && item.sources.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2">
+                {item.sources.map((s, idx) => {
+                  const href = safeHttpUrl(s.url);
+                  if (!href) return null;
+                  return (
+                    <a
+                      key={`${href}-${idx}`}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-80" />
+                      <span>{s.label || "Open link"}</span>
+                    </a>
+                  );
+                })}
+              </div>
+            )}
+            {trackingHref && (
+              <a
+                href={trackingHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                <Radar className="w-3.5 h-3.5 shrink-0 opacity-80" />
+                Track flight (opens FlightRadar24)
+              </a>
+            )}
           </div>
           <div className="text-right flex-shrink-0">
-            <div className="font-semibold text-gray-900">€{item.estimatedCost.toLocaleString()}</div>
+            <div className="font-semibold text-foreground">€{item.estimatedCost.toLocaleString()}</div>
             <Badge variant="outline" className={`text-xs mt-1 ${color} border-0`}>
               {item.type}
             </Badge>
@@ -139,8 +239,9 @@ export default function ItineraryPage() {
   const [generating, setGenerating] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set([1]));
   const [streamText, setStreamText] = useState("");
+  const [streamError, setStreamError] = useState("");
   const [toolCalls, setToolCalls] = useState<string[]>([]);
-  const [done, setDone] = useState(false);
+  const [streamFinished, setStreamFinished] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -168,8 +269,9 @@ export default function ItineraryPage() {
     if (!event) return;
     setGenerating(true);
     setStreamText("");
+    setStreamError("");
     setToolCalls([]);
-    setDone(false);
+    setStreamFinished(false);
     setItinerary(null);
 
     try {
@@ -187,7 +289,22 @@ export default function ItineraryPage() {
         }),
       });
 
-      if (!res.body) return;
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        setStreamError(
+          typeof errBody?.error === "string"
+            ? errBody.error
+            : "Request failed. Please try again."
+        );
+        setStreamFinished(true);
+        return;
+      }
+
+      if (!res.body) {
+        setStreamError("No response body from server.");
+        setStreamFinished(true);
+        return;
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -199,26 +316,44 @@ export default function ItineraryPage() {
 
         const chunk = decoder.decode(value, { stream: true });
         fullText += chunk;
-        setStreamText(fullText);
+        const { displayText, streamError: err } =
+          splitAgentStreamPayload(fullText);
+        setStreamText(displayText);
+        if (err) setStreamError(err);
 
-        const newCalls = parseToolCalls(fullText);
+        const newCalls = parseToolCalls(displayText);
         setToolCalls(newCalls);
       }
 
-      setDone(true);
+      const { displayText, streamError: finalErr } =
+        splitAgentStreamPayload(fullText);
+      setStreamText(displayText);
+      if (finalErr) setStreamError(finalErr);
+      setStreamFinished(true);
 
-      // Reload event to get saved itinerary
-      const updated = await fetch(`/api/events/${id}`).then((r) => r.json());
-      if (updated.itinerary) {
-        try {
-          setItinerary(JSON.parse(updated.itinerary) as Itinerary);
-          setExpandedDays(new Set([1]));
-        } catch (_e) {
-          // ignore parse error
+      if (!finalErr) {
+        const updated = await fetch(`/api/events/${id}`).then((r) => r.json());
+        if (updated.itinerary) {
+          try {
+            setItinerary(JSON.parse(updated.itinerary) as Itinerary);
+            setExpandedDays(new Set([1]));
+          } catch (_e) {
+            setStreamError(
+              "The agent finished but the saved itinerary could not be loaded. Try refreshing the page."
+            );
+          }
+        } else {
+          setStreamError(
+            "The agent did not save an itinerary (it may have stopped early or hit a limit). Try again or switch model in .env — see README."
+          );
         }
       }
     } catch (err) {
       console.error(err);
+      setStreamError(
+        err instanceof Error ? err.message : "Network error while generating."
+      );
+      setStreamFinished(true);
     } finally {
       setGenerating(false);
     }
@@ -236,7 +371,7 @@ export default function ItineraryPage() {
   if (!event) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
@@ -245,7 +380,7 @@ export default function ItineraryPage() {
     <div>
       <Link
         href={`/dashboard/events/${id}`}
-        className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to event
@@ -253,13 +388,13 @@ export default function ItineraryPage() {
 
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Itinerary</h1>
-          <p className="text-gray-500 mt-1">{event.name} · {event.destination}</p>
+          <h1 className="text-3xl font-bold text-foreground">Itinerary</h1>
+          <p className="text-muted-foreground mt-1">{event.name} · {event.destination}</p>
         </div>
         <Button
           onClick={generateItinerary}
           disabled={generating}
-          className="bg-blue-600 hover:bg-blue-700 gap-2"
+          className="bg-primary hover:bg-primary/90 gap-2"
         >
           {generating ? (
             <>
@@ -281,30 +416,43 @@ export default function ItineraryPage() {
       </div>
 
       {/* Agent stream panel */}
-      {(generating || streamText) && (
-        <Card className="border border-blue-100 mb-8">
+      {(generating || streamText || streamError) && (
+        <Card className="border border-primary/25 mb-8">
           <CardContent className="p-6">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                 <Brain className="w-4 h-4 text-white" />
               </div>
               <div>
-                <div className="font-semibold text-gray-900 text-sm">Planning Agent</div>
-                <div className="text-xs text-gray-500">Powered by Gemini 2.0 Flash</div>
+                <div className="font-semibold text-foreground text-sm">Planning Agent</div>
+                <div className="text-xs text-muted-foreground">Powered by Google Gemini</div>
               </div>
               {generating && (
-                <div className="ml-auto flex items-center gap-2 text-xs text-blue-600">
-                  <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                <div className="ml-auto flex items-center gap-2 text-xs text-primary">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                   Working...
                 </div>
               )}
-              {done && !generating && (
+              {streamFinished && !generating && !streamError && (
                 <div className="ml-auto flex items-center gap-2 text-xs text-green-600">
                   <CheckCircle className="w-4 h-4" />
                   Complete
                 </div>
               )}
+              {streamFinished && !generating && streamError && (
+                <div className="ml-auto flex items-center gap-2 text-xs text-destructive">
+                  <AlertTriangle className="w-4 h-4" />
+                  Failed
+                </div>
+              )}
             </div>
+
+            {streamError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{streamError}</AlertDescription>
+              </Alert>
+            )}
 
             {toolCalls.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
@@ -316,13 +464,13 @@ export default function ItineraryPage() {
 
             <div
               ref={chatRef}
-              className="max-h-48 overflow-y-auto bg-gray-50 rounded-lg p-4 text-sm text-gray-700 font-mono leading-relaxed whitespace-pre-wrap"
+              className="max-h-48 overflow-y-auto bg-muted/50 rounded-lg p-4 text-sm text-foreground font-mono leading-relaxed whitespace-pre-wrap"
             >
               {streamText || (
-                <span className="text-gray-400 italic">Agent is initializing...</span>
+                <span className="text-muted-foreground italic">Agent is initializing...</span>
               )}
               {generating && (
-                <span className="inline-block w-2 h-4 bg-blue-500 ml-1 animate-pulse" />
+                <span className="inline-block w-2 h-4 bg-primary/100 ml-1 animate-pulse" />
               )}
             </div>
           </CardContent>
@@ -333,16 +481,37 @@ export default function ItineraryPage() {
       {itinerary ? (
         <div className="space-y-4">
           {/* Summary card */}
-          <Card className="border-2 border-blue-50 bg-gradient-to-r from-blue-50 to-indigo-50">
+          <Card className="border-2 border-primary/15 bg-gradient-to-r from-primary/8 to-chart-4/10">
             <CardContent className="p-6">
+              {(itinerary.pricingTrustNote || itinerary.itineraryQuotedAt) && (
+                <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100 [&>svg]:text-amber-800 dark:[&>svg]:text-amber-200">
+                  <Info className="h-4 w-4" />
+                  <AlertDescription className="text-sm leading-relaxed">
+                    {itinerary.pricingTrustNote && (
+                      <span className="block">{itinerary.pricingTrustNote}</span>
+                    )}
+                    {itinerary.itineraryQuotedAt && formatIsoUtc(itinerary.itineraryQuotedAt) && (
+                      <span className="mt-2 block text-xs opacity-90">
+                        Itinerary saved at {formatIsoUtc(itinerary.itineraryQuotedAt)}.
+                        {itinerary.dataProvenance && (
+                          <> Data mode: <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">{itinerary.dataProvenance}</code>.</>
+                        )}
+                      </span>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold text-gray-900 mb-1">Trip summary</h2>
-                  <p className="text-sm text-gray-600 max-w-2xl">{itinerary.summary}</p>
+                  <h2 className="font-semibold text-foreground mb-1">Trip summary</h2>
+                  <p className="text-sm text-muted-foreground max-w-2xl">{itinerary.summary}</p>
+                  <p className="text-xs text-muted-foreground/90 max-w-2xl mt-3 leading-relaxed">
+                    Line-item links open discovery pages (e.g. Google Flights, Hotels, Maps) tied to the search tools used to build this plan — use them to verify schedules, availability, and current pricing before booking.
+                  </p>
                 </div>
                 <div className="text-right ml-6 flex-shrink-0">
-                  <div className="text-xs text-gray-500 mb-1">Total estimated</div>
-                  <div className="text-3xl font-bold text-blue-600">
+                  <div className="text-xs text-muted-foreground mb-1">Total estimated</div>
+                  <div className="text-3xl font-bold text-primary">
                     €{itinerary.totalEstimatedCost.toLocaleString()}
                   </div>
                   {event.budget && (
@@ -359,31 +528,31 @@ export default function ItineraryPage() {
 
           {/* Day-by-day accordion */}
           {itinerary.days.map((day) => (
-            <Card key={day.day} className="border border-gray-100">
+            <Card key={day.day} className="border border-border">
               <button
                 onClick={() => toggleDay(day.day)}
-                className="w-full p-6 text-left flex items-center justify-between hover:bg-gray-50 transition-colors rounded-t-xl"
+                className="w-full p-6 text-left flex items-center justify-between hover:bg-muted/50 transition-colors rounded-t-xl"
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                     D{day.day}
                   </div>
                   <div>
-                    <div className="font-semibold text-gray-900">{day.title}</div>
-                    <div className="text-sm text-gray-500">{day.date}</div>
+                    <div className="font-semibold text-foreground">{day.title}</div>
+                    <div className="text-sm text-muted-foreground">{day.date}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right hidden sm:block">
-                    <div className="text-xs text-gray-500">Day cost</div>
-                    <div className="font-semibold text-gray-900">
+                    <div className="text-xs text-muted-foreground">Day cost</div>
+                    <div className="font-semibold text-foreground">
                       €{day.items.reduce((s, i) => s + i.estimatedCost, 0).toLocaleString()}
                     </div>
                   </div>
                   {expandedDays.has(day.day) ? (
-                    <ChevronUp className="w-5 h-5 text-gray-400" />
+                    <ChevronUp className="w-5 h-5 text-muted-foreground" />
                   ) : (
-                    <ChevronDown className="w-5 h-5 text-gray-400" />
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
               </button>
@@ -399,18 +568,18 @@ export default function ItineraryPage() {
             </Card>
           ))}
         </div>
-      ) : !generating && !streamText ? (
-        <div className="text-center py-20 border-2 border-dashed border-gray-200 rounded-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-4">
-            <Brain className="w-8 h-8 text-blue-400" />
+      ) : !generating && !streamText && !streamError ? (
+        <div className="text-center py-20 border-2 border-dashed border-border rounded-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <Brain className="w-8 h-8 text-primary/70" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No itinerary yet</h3>
-          <p className="text-gray-500 mb-6 max-w-sm mx-auto">
+          <h3 className="text-xl font-semibold text-foreground mb-2">No itinerary yet</h3>
+          <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
             Click "Generate itinerary" to let the Planning Agent build a complete day-by-day schedule with transport, accommodation, activities and dining.
           </p>
           <Button
             onClick={generateItinerary}
-            className="bg-blue-600 hover:bg-blue-700 gap-2"
+            className="bg-primary hover:bg-primary/90 gap-2"
           >
             <Sparkles className="w-4 h-4" />
             Generate itinerary

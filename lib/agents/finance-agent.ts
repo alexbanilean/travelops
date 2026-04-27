@@ -1,5 +1,12 @@
 import { google } from "@ai-sdk/google";
 import { streamText, stepCountIs } from "ai";
+import { GEMINI_MODEL } from "@/lib/ai-model";
+import {
+  createGeminiPrepareStep,
+  getGeminiMaxRetries,
+} from "@/lib/gemini-rate-limit";
+import { createFinanceAgentStreamLogHooks } from "@/lib/agent-stream-log-hooks";
+import { createAgentLogger } from "@/lib/agent-server-log";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { extractInvoiceData } from "@/lib/tools/extract-invoice";
@@ -29,6 +36,20 @@ export function createFinanceAgentStream(params: {
   action: "estimate" | "summary" | "processInvoice";
   invoiceId?: string;
 }) {
+  const financeLog = createAgentLogger("finance");
+  const serverEventId = params.eventId;
+
+  /** Model-supplied event ids are not trusted; always use the API request event. */
+  const resolveEventId = (modelProvided: string): string => {
+    if (modelProvided !== serverEventId) {
+      financeLog.warn("Tool eventId differs from API request; using request eventId", {
+        modelProvided,
+        serverEventId,
+      });
+    }
+    return serverEventId;
+  };
+
   const prompts: Record<string, string> = {
     estimate: `Calculate a comprehensive budget breakdown for event ID: ${params.eventId}. 
     Get the budget summary, calculate the breakdown by category, and compare with the approved budget. 
@@ -40,8 +61,15 @@ export function createFinanceAgentStream(params: {
   };
 
   return streamText({
-    model: google("gemini-2.0-flash"),
+    ...createFinanceAgentStreamLogHooks({
+      eventId: params.eventId,
+      action: params.action,
+      invoiceId: params.invoiceId,
+    }),
+    model: google(GEMINI_MODEL),
     system: FINANCE_SYSTEM_PROMPT,
+    maxRetries: getGeminiMaxRetries(),
+    prepareStep: createGeminiPrepareStep(),
     stopWhen: stepCountIs(6),
     prompt: prompts[params.action],
     tools: {
@@ -52,8 +80,9 @@ export function createFinanceAgentStream(params: {
           eventId: z.string().describe("The event ID"),
         }),
         execute: async (args: { eventId: string }) => {
+          const eventId = resolveEventId(args.eventId);
           const event = await prisma.event.findUnique({
-            where: { id: args.eventId },
+            where: { id: eventId },
             include: { expenses: true, invoices: true },
           });
 
@@ -87,8 +116,9 @@ export function createFinanceAgentStream(params: {
           eventId: z.string().describe("The event ID"),
         }),
         execute: async (args: { eventId: string }) => {
+          const eventId = resolveEventId(args.eventId);
           const expenses = await prisma.expense.findMany({
-            where: { eventId: args.eventId },
+            where: { eventId },
           });
 
           const breakdown = expenses.reduce(
@@ -124,8 +154,9 @@ export function createFinanceAgentStream(params: {
           eventId: z.string().describe("The event ID"),
         }),
         execute: async (args: { eventId: string }) => {
+          const eventId = resolveEventId(args.eventId);
           const event = await prisma.event.findUnique({
-            where: { id: args.eventId },
+            where: { id: eventId },
             include: { expenses: true },
           });
 
@@ -185,33 +216,42 @@ export function createFinanceAgentStream(params: {
 
           if (!invoice) return { error: "Invoice not found" };
 
+          if (invoice.eventId !== serverEventId) {
+            return {
+              error:
+                "Invoice does not belong to this event. Use an invoice uploaded for the current event.",
+            };
+          }
+
           const uploadsDir = path.join(process.cwd(), "public", "uploads");
           const filePath = path.join(uploadsDir, invoice.filename);
 
           const extracted = await extractInvoiceData(filePath);
 
-          if (!extracted) {
-            return { error: "Could not extract data from invoice" };
+          if (!extracted.ok) {
+            return { error: extracted.error };
           }
+
+          const data = extracted.data;
 
           await prisma.invoice.update({
             where: { id: args.invoiceId },
             data: {
-              vendor: extracted.vendor,
-              amount: extracted.amount,
-              category: extracted.category,
-              date: extracted.date,
-              rawData: JSON.stringify(extracted),
+              vendor: data.vendor,
+              amount: data.amount,
+              category: data.category,
+              date: data.date,
+              rawData: JSON.stringify(data),
             },
           });
 
           return {
             success: true,
             extracted: {
-              vendor: extracted.vendor,
-              amount: extracted.amount,
-              category: extracted.category,
-              date: extracted.date,
+              vendor: data.vendor,
+              amount: data.amount,
+              category: data.category,
+              date: data.date,
             },
           };
         },
@@ -243,8 +283,9 @@ export function createFinanceAgentStream(params: {
           estimated: number;
           confirmed?: number;
         }) => {
+          const eventId = resolveEventId(args.eventId);
           const existing = await prisma.expense.findFirst({
-            where: { eventId: args.eventId, category: args.category },
+            where: { eventId, category: args.category },
           });
 
           if (existing) {
@@ -257,7 +298,7 @@ export function createFinanceAgentStream(params: {
 
           const created = await prisma.expense.create({
             data: {
-              eventId: args.eventId,
+              eventId,
               category: args.category,
               label: args.label,
               estimated: args.estimated,

@@ -1,4 +1,7 @@
 import { google } from "@ai-sdk/google";
+import { GEMINI_MODEL } from "@/lib/ai-model";
+import { formatLlmError } from "@/lib/format-llm-error";
+import { getGeminiMaxRetries } from "@/lib/gemini-rate-limit";
 import { generateObject } from "ai";
 import { z } from "zod";
 import fs from "fs";
@@ -24,16 +27,20 @@ const InvoiceSchema = z.object({
 
 export type ExtractedInvoice = z.infer<typeof InvoiceSchema>;
 
+export type ExtractInvoiceResult =
+  | { ok: true; data: ExtractedInvoice }
+  | { ok: false; error: string };
+
 export async function extractInvoiceData(
   filePath: string
-): Promise<ExtractedInvoice | null> {
+): Promise<ExtractInvoiceResult> {
   try {
     const absolutePath = path.isAbsolute(filePath)
       ? filePath
       : path.join(process.cwd(), filePath);
 
     if (!fs.existsSync(absolutePath)) {
-      return null;
+      return { ok: false, error: "Invoice file not found on the server." };
     }
 
     const fileBuffer = fs.readFileSync(absolutePath);
@@ -43,7 +50,8 @@ export async function extractInvoiceData(
       : "image/jpeg";
 
     const { object } = await generateObject({
-      model: google("gemini-2.0-flash"),
+      model: google(GEMINI_MODEL),
+      maxRetries: getGeminiMaxRetries(),
       schema: InvoiceSchema,
       messages: [
         {
@@ -71,9 +79,9 @@ Be precise and extract exactly what is shown. If a field is not clearly visible,
       ],
     });
 
-    return object;
+    return { ok: true, data: object };
   } catch (error) {
     console.error("Invoice extraction error:", error);
-    return null;
+    return { ok: false, error: formatLlmError(error) };
   }
 }

@@ -1,3 +1,10 @@
+import {
+  DATA_PROVENANCE_SYNTHETIC_DEMO,
+  computeOfferExpiresAtIso,
+  DEMO_OFFER_VALIDITY_HOURS,
+} from "@/lib/travel-data-provenance";
+import { flightRadar24DataFlightUrl, googleFlightsSearchUrl } from "@/lib/travel-source-urls";
+
 export interface FlightOption {
   airline: string;
   flightNumber: string;
@@ -7,9 +14,31 @@ export interface FlightOption {
   pricePerPerson: number;
   totalPrice: number;
   class: string;
+  /** User-facing discovery link (same route/date search for all options in this result set). */
+  sourceUrl: string;
+  sourceLabel: string;
+  /** ISO-8601 when this row was priced (server clock). */
+  priceQuotedAt: string;
+  /** ISO-8601 suggested “stale after” for demo data (not airline fare expiry). */
+  offerExpiresAt: string;
+  dataProvenance: typeof DATA_PROVENANCE_SYNTHETIC_DEMO;
+  pricingContextNote: string;
+  /** FlightRadar24 flight history / schedule hub (not official ops data). */
+  trackingUrl: string;
 }
 
-const FLIGHT_DATA: Record<string, FlightOption[]> = {
+type FlightSeed = Omit<
+  FlightOption,
+  | "sourceUrl"
+  | "sourceLabel"
+  | "priceQuotedAt"
+  | "offerExpiresAt"
+  | "dataProvenance"
+  | "pricingContextNote"
+  | "trackingUrl"
+>;
+
+const FLIGHT_DATA: Record<string, FlightSeed[]> = {
   default: [
     {
       airline: "Lufthansa",
@@ -117,8 +146,26 @@ export function searchFlights(params: {
   const key = params.destination.toLowerCase().split(",")[0].trim();
   const baseData = FLIGHT_DATA[key] || FLIGHT_DATA.default;
 
+  const sourceUrl = googleFlightsSearchUrl(
+    params.origin,
+    params.destination,
+    params.date
+  );
+  const sourceLabel = "Google Flights";
+  const quoted = new Date();
+  const priceQuotedAt = quoted.toISOString();
+  const offerExpiresAt = computeOfferExpiresAtIso(quoted);
+  const pricingContextNote = `Demo catalog total for ${params.participants} pax; indicative only. Stale after ~${DEMO_OFFER_VALIDITY_HOURS}h unless refreshed. Not an airline offer.`;
+
   return baseData.map((f) => ({
     ...f,
     totalPrice: Math.round(f.pricePerPerson * params.participants),
+    sourceUrl,
+    sourceLabel,
+    priceQuotedAt,
+    offerExpiresAt,
+    dataProvenance: DATA_PROVENANCE_SYNTHETIC_DEMO,
+    pricingContextNote,
+    trackingUrl: flightRadar24DataFlightUrl(f.flightNumber),
   }));
 }

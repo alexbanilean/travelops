@@ -1,3 +1,10 @@
+import {
+  DATA_PROVENANCE_SYNTHETIC_DEMO,
+  computeOfferExpiresAtIso,
+  DEMO_OFFER_VALIDITY_HOURS,
+} from "@/lib/travel-data-provenance";
+import { googleWebSearchUrl } from "@/lib/travel-source-urls";
+
 export interface ActivityOption {
   name: string;
   type: string;
@@ -7,9 +14,25 @@ export interface ActivityOption {
   maxParticipants: number;
   description: string;
   rating: number;
+  sourceUrl: string;
+  sourceLabel: string;
+  priceQuotedAt: string;
+  offerExpiresAt: string;
+  dataProvenance: typeof DATA_PROVENANCE_SYNTHETIC_DEMO;
+  pricingContextNote: string;
 }
 
-const ACTIVITY_DATA: Record<string, ActivityOption[]> = {
+type ActivitySeed = Omit<
+  ActivityOption,
+  | "sourceUrl"
+  | "sourceLabel"
+  | "priceQuotedAt"
+  | "offerExpiresAt"
+  | "dataProvenance"
+  | "pricingContextNote"
+>;
+
+const ACTIVITY_DATA: Record<string, ActivitySeed[]> = {
   default: [
     {
       name: "City Walking Tour",
@@ -162,6 +185,10 @@ export function searchActivities(params: {
 }): ActivityOption[] {
   const key = params.location.toLowerCase().split(",")[0].trim();
   const baseData = ACTIVITY_DATA[key] || ACTIVITY_DATA.default;
+  const quoted = new Date();
+  const priceQuotedAt = quoted.toISOString();
+  const offerExpiresAt = computeOfferExpiresAtIso(quoted);
+  const pricingContextNote = `Demo activity price for ${params.participants} pax; confirm with operator. ~${DEMO_OFFER_VALIDITY_HOURS}h freshness window.`;
 
   return baseData
     .filter((a) => a.maxParticipants >= params.participants)
@@ -169,5 +196,11 @@ export function searchActivities(params: {
     .map((a) => ({
       ...a,
       totalPrice: Math.round(a.pricePerPerson * params.participants),
+      sourceUrl: googleWebSearchUrl(`${a.name} ${params.location} booking`),
+      sourceLabel: "Web search",
+      priceQuotedAt,
+      offerExpiresAt,
+      dataProvenance: DATA_PROVENANCE_SYNTHETIC_DEMO,
+      pricingContextNote,
     }));
 }

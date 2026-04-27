@@ -1,3 +1,10 @@
+import {
+  DATA_PROVENANCE_SYNTHETIC_DEMO,
+  computeOfferExpiresAtIso,
+  DEMO_OFFER_VALIDITY_HOURS,
+} from "@/lib/travel-data-provenance";
+import { googleTravelHotelsSearchUrl } from "@/lib/travel-source-urls";
+
 export interface HotelOption {
   name: string;
   stars: number;
@@ -7,9 +14,25 @@ export interface HotelOption {
   amenities: string[];
   rating: number;
   capacity: number;
+  sourceUrl: string;
+  sourceLabel: string;
+  priceQuotedAt: string;
+  offerExpiresAt: string;
+  dataProvenance: typeof DATA_PROVENANCE_SYNTHETIC_DEMO;
+  pricingContextNote: string;
 }
 
-const HOTEL_DATA: Record<string, HotelOption[]> = {
+type HotelSeed = Omit<
+  HotelOption,
+  | "sourceUrl"
+  | "sourceLabel"
+  | "priceQuotedAt"
+  | "offerExpiresAt"
+  | "dataProvenance"
+  | "pricingContextNote"
+>;
+
+const HOTEL_DATA: Record<string, HotelSeed[]> = {
   default: [
     {
       name: "Grand Palace Hotel",
@@ -160,6 +183,10 @@ export function searchHotels(params: {
   );
 
   const rooms = Math.ceil(params.participants / 2);
+  const quoted = new Date();
+  const priceQuotedAt = quoted.toISOString();
+  const offerExpiresAt = computeOfferExpiresAtIso(quoted);
+  const pricingContextNote = `Demo nightly rate × ${rooms} room(s) × ${nights} night(s); not CRS live BAR. Re-check ~${DEMO_OFFER_VALIDITY_HOURS}h.`;
 
   return baseData
     .filter((h) =>
@@ -169,5 +196,11 @@ export function searchHotels(params: {
     .map((h) => ({
       ...h,
       totalPrice: Math.round(h.pricePerNight * rooms * nights),
+      sourceUrl: googleTravelHotelsSearchUrl(h.name, params.location),
+      sourceLabel: "Google Hotels",
+      priceQuotedAt,
+      offerExpiresAt,
+      dataProvenance: DATA_PROVENANCE_SYNTHETIC_DEMO,
+      pricingContextNote,
     }));
 }

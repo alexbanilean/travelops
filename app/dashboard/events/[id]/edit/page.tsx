@@ -1,20 +1,37 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { MapPin, Users, Calendar, DollarSign, Sparkles, ArrowLeft } from "lucide-react";
+import {
+  MapPin,
+  Users,
+  Calendar,
+  DollarSign,
+  Sparkles,
+  ArrowLeft,
+  Save,
+} from "lucide-react";
 import Link from "next/link";
 
-export default function NewEventPage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+function toInputDate(iso: string): string {
+  try {
+    return new Date(iso).toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
 
+export default function EditEventPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "",
     destination: "",
@@ -25,52 +42,97 @@ export default function NewEventPage() {
     preferences: "",
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/events/${id}`)
+      .then((r) => {
+        if (!r.ok) throw new Error("not found");
+        return r.json();
+      })
+      .then((ev) => {
+        if (cancelled) return;
+        setForm({
+          name: ev.name ?? "",
+          destination: ev.destination ?? "",
+          startDate: toInputDate(ev.startDate),
+          endDate: toInputDate(ev.endDate),
+          participants: String(ev.participants ?? ""),
+          budget: ev.budget != null ? String(ev.budget) : "",
+          preferences: ev.preferences ?? "",
+        });
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("Event could not be loaded.");
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSaving(true);
     setError("");
 
     try {
-      const res = await fetch("/api/events", {
-        method: "POST",
+      const res = await fetch(`/api/events/${id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
           destination: form.destination,
           startDate: form.startDate,
           endDate: form.endDate,
-          participants: parseInt(form.participants),
-          budget: form.budget ? parseFloat(form.budget) : undefined,
-          preferences: form.preferences || undefined,
+          participants: parseInt(form.participants, 10),
+          budget: form.budget ? parseFloat(form.budget) : null,
+          preferences: form.preferences.trim() ? form.preferences : null,
         }),
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        setError(JSON.stringify(err.error));
+        const err = await res.json().catch(() => ({}));
+        setError(
+          typeof err?.error === "string"
+            ? err.error
+            : JSON.stringify(err?.error ?? "Update failed")
+        );
         return;
       }
 
-      const event = await res.json();
-      router.push(`/dashboard/events/${event.id}`);
+      router.push(`/dashboard/events/${id}`);
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto">
-      <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6">
+      <Link
+        href={`/dashboard/events/${id}`}
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6"
+      >
         <ArrowLeft className="w-4 h-4" />
-        Back to events
+        Back to event
       </Link>
 
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground">Create new event</h1>
+        <h1 className="text-3xl font-bold text-foreground">Edit event</h1>
         <p className="text-muted-foreground mt-1">
-          Fill in the details and our AI agents will take it from there.
+          Update trip details. Itinerary and expenses stay attached unless you regenerate them.
         </p>
       </div>
 
@@ -84,7 +146,6 @@ export default function NewEventPage() {
               </Label>
               <Input
                 id="name"
-                placeholder="Q2 Team Building Retreat"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 required
@@ -98,14 +159,10 @@ export default function NewEventPage() {
               </Label>
               <Input
                 id="destination"
-                placeholder="Barcelona, Spain"
                 value={form.destination}
                 onChange={(e) => setForm({ ...form, destination: e.target.value })}
                 required
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                Try: Barcelona, Prague, Amsterdam, or any European city
-              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -146,9 +203,8 @@ export default function NewEventPage() {
                 <Input
                   id="participants"
                   type="number"
-                  min="1"
-                  max="500"
-                  placeholder="20"
+                  min={1}
+                  max={2000}
                   value={form.participants}
                   onChange={(e) => setForm({ ...form, participants: e.target.value })}
                   required
@@ -162,8 +218,7 @@ export default function NewEventPage() {
                 <Input
                   id="budget"
                   type="number"
-                  min="0"
-                  placeholder="10000"
+                  min={0}
                   value={form.budget}
                   onChange={(e) => setForm({ ...form, budget: e.target.value })}
                 />
@@ -171,12 +226,10 @@ export default function NewEventPage() {
             </div>
 
             <div>
-              <Label htmlFor="preferences" className="flex items-center gap-2 mb-2">
-                Preferences <span className="text-muted-foreground font-normal">optional</span>
-              </Label>
+              <Label htmlFor="preferences">Preferences (optional)</Label>
               <Textarea
                 id="preferences"
-                placeholder="Outdoor activities, team building focus, vegetarian-friendly restaurants, 4-star hotels minimum..."
+                className="mt-2"
                 rows={3}
                 value={form.preferences}
                 onChange={(e) => setForm({ ...form, preferences: e.target.value })}
@@ -191,18 +244,18 @@ export default function NewEventPage() {
 
             <Button
               type="submit"
-              disabled={loading}
+              disabled={saving}
               className="w-full bg-primary hover:bg-primary/90 h-12 text-base gap-2"
             >
-              {loading ? (
+              {saving ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Creating event...
+                  Saving…
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4" />
-                  Create event & start planning
+                  <Save className="w-4 h-4" />
+                  Save changes
                 </>
               )}
             </Button>

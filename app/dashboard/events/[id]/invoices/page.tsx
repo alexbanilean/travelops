@@ -6,6 +6,8 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { splitAgentStreamPayload } from "@/lib/agent-stream-protocol";
 import {
   ArrowLeft,
   Receipt,
@@ -15,6 +17,7 @@ import {
   Clock,
   FileText,
   X,
+  AlertTriangle,
 } from "lucide-react";
 
 interface Invoice {
@@ -36,10 +39,10 @@ interface Event {
 
 const CATEGORY_COLORS: Record<string, string> = {
   accommodation: "bg-purple-100 text-purple-700",
-  transport: "bg-blue-100 text-blue-700",
+  transport: "bg-primary/15 text-primary",
   food: "bg-orange-100 text-orange-700",
   activities: "bg-green-100 text-green-700",
-  other: "bg-gray-100 text-gray-700",
+  other: "bg-muted text-foreground",
 };
 
 export default function InvoicesPage() {
@@ -50,6 +53,7 @@ export default function InvoicesPage() {
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [financeAgentError, setFinanceAgentError] = useState("");
 
   const fetchEvent = useCallback(() => {
     fetch(`/api/events/${id}`)
@@ -95,6 +99,7 @@ export default function InvoicesPage() {
 
   const processInvoice = async (invoiceId: string) => {
     setProcessingIds((prev) => new Set(prev).add(invoiceId));
+    setFinanceAgentError("");
 
     try {
       const res = await fetch("/api/agents/finance", {
@@ -107,20 +112,43 @@ export default function InvoicesPage() {
         }),
       });
 
-      if (!res.body) return;
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        setFinanceAgentError(
+          typeof errBody?.error === "string"
+            ? errBody.error
+            : "Could not start invoice processing."
+        );
+        return;
+      }
+
+      if (!res.body) {
+        setFinanceAgentError("No response from server.");
+        return;
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let fullText = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        decoder.decode(value, { stream: true });
+        fullText += decoder.decode(value, { stream: true });
+      }
+
+      const { streamError: finalErr } = splitAgentStreamPayload(fullText);
+      if (finalErr) {
+        setFinanceAgentError(finalErr);
+        return;
       }
 
       fetchEvent();
     } catch (err) {
       console.error(err);
+      setFinanceAgentError(
+        err instanceof Error ? err.message : "Invoice processing failed."
+      );
     } finally {
       setProcessingIds((prev) => {
         const next = new Set(prev);
@@ -146,7 +174,7 @@ export default function InvoicesPage() {
     <div>
       <Link
         href={`/dashboard/events/${id}`}
-        className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to event
@@ -154,20 +182,27 @@ export default function InvoicesPage() {
 
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-500 mt-1">
+          <h1 className="text-3xl font-bold text-foreground">Invoices</h1>
+          <p className="text-muted-foreground mt-1">
             {event.name} · {event.invoices.length} invoice
             {event.invoices.length !== 1 ? "s" : ""} · {processedCount} processed
           </p>
         </div>
       </div>
 
+      {financeAgentError && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{financeAgentError}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Upload zone */}
       <Card
         className={`border-2 border-dashed mb-8 transition-colors ${
           dragOver
             ? "border-purple-400 bg-purple-50"
-            : "border-gray-200 hover:border-gray-300"
+            : "border-border hover:border-muted-foreground/30"
         }`}
         onDragOver={(e) => {
           e.preventDefault();
@@ -183,21 +218,21 @@ export default function InvoicesPage() {
         <CardContent className="p-10 text-center">
           <div
             className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 transition-colors ${
-              dragOver ? "bg-purple-100" : "bg-gray-100"
+              dragOver ? "bg-purple-100" : "bg-muted"
             }`}
           >
             {uploading ? (
               <div className="w-6 h-6 border-2 border-purple-600/30 border-t-purple-600 rounded-full animate-spin" />
             ) : (
               <Upload
-                className={`w-7 h-7 ${dragOver ? "text-purple-600" : "text-gray-400"}`}
+                className={`w-7 h-7 ${dragOver ? "text-purple-600" : "text-muted-foreground"}`}
               />
             )}
           </div>
-          <h3 className="font-semibold text-gray-900 mb-1">
+          <h3 className="font-semibold text-foreground mb-1">
             {uploading ? "Uploading..." : "Drop invoices here"}
           </h3>
-          <p className="text-sm text-gray-500 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             JPEG, PNG, WebP or PDF · The Finance Agent will extract data automatically
           </p>
           <label className="cursor-pointer">
@@ -229,11 +264,11 @@ export default function InvoicesPage() {
       </Card>
 
       {/* Invoice info box */}
-      <div className="mb-6 bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
-        <Sparkles className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+      <div className="mb-6 bg-primary/10 border border-primary/25 rounded-xl p-4 flex gap-3">
+        <Sparkles className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-blue-900">Finance Agent — Invoice OCR</p>
-          <p className="text-sm text-blue-700 mt-0.5">
+          <p className="text-sm font-medium text-primary">Finance Agent — Invoice OCR</p>
+          <p className="text-sm text-primary mt-0.5">
             Upload an invoice (PDF or image) and click "Process" — the Finance Agent uses Gemini Vision to extract vendor name, amount, expense category and date automatically.
           </p>
         </div>
@@ -241,12 +276,12 @@ export default function InvoicesPage() {
 
       {/* Invoice list */}
       {event.invoices.length === 0 ? (
-        <div className="text-center py-16 border-2 border-dashed border-gray-200 rounded-2xl">
+        <div className="text-center py-16 border-2 border-dashed border-border rounded-2xl">
           <div className="w-16 h-16 rounded-2xl bg-purple-50 flex items-center justify-center mx-auto mb-4">
             <Receipt className="w-8 h-8 text-purple-400" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No invoices yet</h3>
-          <p className="text-gray-500 max-w-sm mx-auto">
+          <h3 className="text-xl font-semibold text-foreground mb-2">No invoices yet</h3>
+          <p className="text-muted-foreground max-w-sm mx-auto">
             Upload invoices above and the Finance Agent will extract all the data using AI.
           </p>
         </div>
@@ -257,24 +292,24 @@ export default function InvoicesPage() {
             const isProcessing = processingIds.has(invoice.id);
 
             return (
-              <Card key={invoice.id} className="border border-gray-100">
+              <Card key={invoice.id} className="border border-border">
                 <CardContent className="p-5">
                   <div className="flex items-center gap-4">
                     <div
                       className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                        isProcessed ? "bg-green-50" : "bg-gray-50"
+                        isProcessed ? "bg-green-50" : "bg-muted/50"
                       }`}
                     >
                       {isProcessed ? (
                         <CheckCircle className="w-5 h-5 text-green-600" />
                       ) : (
-                        <FileText className="w-5 h-5 text-gray-400" />
+                        <FileText className="w-5 h-5 text-muted-foreground" />
                       )}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-gray-900 text-sm truncate">
+                        <span className="font-medium text-foreground text-sm truncate">
                           {invoice.vendor || invoice.filename}
                         </span>
                         {isProcessed ? (
@@ -282,7 +317,7 @@ export default function InvoicesPage() {
                             Processed
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-xs flex-shrink-0 text-gray-500">
+                          <Badge variant="outline" className="text-xs flex-shrink-0 text-muted-foreground">
                             <Clock className="w-3 h-3 mr-1" />
                             Pending
                           </Badge>
@@ -292,7 +327,7 @@ export default function InvoicesPage() {
                       {isProcessed ? (
                         <div className="flex flex-wrap items-center gap-3 text-sm">
                           {invoice.amount && (
-                            <span className="font-semibold text-gray-900">
+                            <span className="font-semibold text-foreground">
                               €{invoice.amount.toLocaleString()}
                             </span>
                           )}
@@ -306,11 +341,11 @@ export default function InvoicesPage() {
                             </span>
                           )}
                           {invoice.date && (
-                            <span className="text-gray-500 text-xs">{invoice.date}</span>
+                            <span className="text-muted-foreground text-xs">{invoice.date}</span>
                           )}
                         </div>
                       ) : (
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-muted-foreground">
                           {invoice.filename} · Ready to process
                         </p>
                       )}
@@ -322,7 +357,7 @@ export default function InvoicesPage() {
                           href={`/uploads/${invoice.filename}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-blue-600 hover:underline"
+                          className="text-xs text-primary hover:underline"
                         >
                           View
                         </a>
@@ -358,14 +393,14 @@ export default function InvoicesPage() {
 
       {/* Summary */}
       {event.invoices.length > 0 && (
-        <Card className="border border-gray-100 mt-6">
+        <Card className="border border-border mt-6">
           <CardContent className="p-5">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-600">
+              <span className="text-muted-foreground">
                 {processedCount} of {event.invoices.length} invoices processed
               </span>
               {processedCount > 0 && (
-                <span className="font-semibold text-gray-900">
+                <span className="font-semibold text-foreground">
                   Total: €
                   {event.invoices
                     .filter((inv) => inv.amount)

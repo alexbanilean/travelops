@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import { splitAgentStreamPayload } from "@/lib/agent-stream-protocol";
 import {
   ArrowLeft,
   Receipt,
@@ -69,6 +70,7 @@ export default function BudgetPage() {
   const [loading, setLoading] = useState(true);
   const [estimating, setEstimating] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [streamError, setStreamError] = useState("");
   const [agentDone, setAgentDone] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +97,7 @@ export default function BudgetPage() {
     if (!event) return;
     setEstimating(true);
     setStreamText("");
+    setStreamError("");
     setAgentDone(false);
 
     try {
@@ -104,7 +107,22 @@ export default function BudgetPage() {
         body: JSON.stringify({ eventId: event.id, action: "estimate" }),
       });
 
-      if (!res.body) return;
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        setStreamError(
+          typeof errBody?.error === "string"
+            ? errBody.error
+            : "Request failed. Please try again."
+        );
+        setAgentDone(true);
+        return;
+      }
+
+      if (!res.body) {
+        setStreamError("No response body from server.");
+        setAgentDone(true);
+        return;
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -116,13 +134,24 @@ export default function BudgetPage() {
 
         const chunk = decoder.decode(value, { stream: true });
         fullText += chunk;
-        setStreamText(fullText);
+        const { displayText, streamError: err } =
+          splitAgentStreamPayload(fullText);
+        setStreamText(displayText);
+        if (err) setStreamError(err);
       }
 
+      const { displayText, streamError: finalErr } =
+        splitAgentStreamPayload(fullText);
+      setStreamText(displayText);
+      if (finalErr) setStreamError(finalErr);
       setAgentDone(true);
-      fetchEvent();
+      if (!finalErr) fetchEvent();
     } catch (err) {
       console.error(err);
+      setStreamError(
+        err instanceof Error ? err.message : "Network error while analyzing."
+      );
+      setAgentDone(true);
     } finally {
       setEstimating(false);
     }
@@ -162,7 +191,7 @@ export default function BudgetPage() {
     <div>
       <Link
         href={`/dashboard/events/${id}`}
-        className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to event
@@ -170,8 +199,8 @@ export default function BudgetPage() {
 
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Budget</h1>
-          <p className="text-gray-500 mt-1">{event.name} · {event.destination}</p>
+          <h1 className="text-3xl font-bold text-foreground">Budget</h1>
+          <p className="text-muted-foreground mt-1">{event.name} · {event.destination}</p>
         </div>
         <Button
           onClick={runFinanceAgent}
@@ -193,7 +222,7 @@ export default function BudgetPage() {
       </div>
 
       {/* Finance agent stream */}
-      {(estimating || streamText) && (
+      {(estimating || streamText || streamError) && (
         <Card className="border border-emerald-100 mb-8">
           <CardContent className="p-6">
             <div className="flex items-center gap-3 mb-4">
@@ -201,8 +230,8 @@ export default function BudgetPage() {
                 <Brain className="w-4 h-4 text-white" />
               </div>
               <div>
-                <div className="font-semibold text-gray-900 text-sm">Finance Agent</div>
-                <div className="text-xs text-gray-500">Powered by Gemini 2.0 Flash</div>
+                <div className="font-semibold text-foreground text-sm">Finance Agent</div>
+                <div className="text-xs text-muted-foreground">Powered by Google Gemini</div>
               </div>
               {estimating && (
                 <div className="ml-auto flex items-center gap-2 text-xs text-emerald-600">
@@ -210,18 +239,30 @@ export default function BudgetPage() {
                   Analyzing finances...
                 </div>
               )}
-              {agentDone && !estimating && (
+              {agentDone && !estimating && !streamError && (
                 <div className="ml-auto flex items-center gap-2 text-xs text-green-600">
                   <CheckCircle className="w-4 h-4" />
                   Analysis complete
                 </div>
               )}
+              {agentDone && !estimating && streamError && (
+                <div className="ml-auto flex items-center gap-2 text-xs text-destructive">
+                  <AlertTriangle className="w-4 h-4" />
+                  Failed
+                </div>
+              )}
             </div>
+            {streamError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{streamError}</AlertDescription>
+              </Alert>
+            )}
             <div
               ref={chatRef}
-              className="max-h-40 overflow-y-auto bg-gray-50 rounded-lg p-4 text-sm text-gray-700 font-mono leading-relaxed whitespace-pre-wrap"
+              className="max-h-40 overflow-y-auto bg-muted/50 rounded-lg p-4 text-sm text-foreground font-mono leading-relaxed whitespace-pre-wrap"
             >
-              {streamText || <span className="text-gray-400 italic">Initializing Finance Agent...</span>}
+              {streamText || <span className="text-muted-foreground italic">Initializing Finance Agent...</span>}
               {estimating && (
                 <span className="inline-block w-2 h-4 bg-emerald-500 ml-1 animate-pulse" />
               )}
@@ -255,7 +296,7 @@ export default function BudgetPage() {
             label: "Total budget",
             value: event.budget ? `€${event.budget.toLocaleString()}` : "Not set",
             sub: "Approved",
-            color: "text-blue-600",
+            color: "text-primary",
           },
           {
             label: "Estimated spend",
@@ -276,23 +317,23 @@ export default function BudgetPage() {
             color: remaining !== null && remaining < 0 ? "text-red-600" : "text-emerald-600",
           },
         ].map(({ label, value, sub, color }) => (
-          <Card key={label} className="border border-gray-100">
+          <Card key={label} className="border border-border">
             <CardContent className="p-5">
-              <div className="text-xs text-gray-500 mb-1">{label}</div>
+              <div className="text-xs text-muted-foreground mb-1">{label}</div>
               <div className={`text-2xl font-bold ${color}`}>{value}</div>
-              <div className="text-xs text-gray-400 mt-1">{sub}</div>
+              <div className="text-xs text-muted-foreground mt-1">{sub}</div>
             </CardContent>
           </Card>
         ))}
       </div>
 
       {event.expenses.length === 0 ? (
-        <div className="text-center py-20 border-2 border-dashed border-gray-200 rounded-2xl">
+        <div className="text-center py-20 border-2 border-dashed border-border rounded-2xl">
           <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
             <Receipt className="w-8 h-8 text-emerald-400" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No budget data yet</h3>
-          <p className="text-gray-500 mb-6 max-w-sm mx-auto">
+          <h3 className="text-xl font-semibold text-foreground mb-2">No budget data yet</h3>
+          <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
             Generate an itinerary first, then click "Estimate budget" to let the Finance Agent analyze costs.
           </p>
           <Button
@@ -307,10 +348,10 @@ export default function BudgetPage() {
         <div className="space-y-6">
           {/* Budget utilization bar */}
           {event.budget && (
-            <Card className="border border-gray-100">
+            <Card className="border border-border">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-gray-900">Budget utilization</h3>
+                  <h3 className="font-semibold text-foreground">Budget utilization</h3>
                   <Badge
                     className={
                       isOverBudget
@@ -327,9 +368,9 @@ export default function BudgetPage() {
                   value={Math.min(100, utilizationPct)}
                   className="h-3 mb-2"
                 />
-                <div className="flex justify-between text-sm text-gray-500">
+                <div className="flex justify-between text-sm text-muted-foreground">
                   <span>€0</span>
-                  <span className="font-medium text-gray-700">
+                  <span className="font-medium text-foreground">
                     €{totalEstimated.toLocaleString()} estimated
                   </span>
                   <span>€{event.budget.toLocaleString()}</span>
@@ -341,10 +382,10 @@ export default function BudgetPage() {
           {/* Charts */}
           <div className="grid md:grid-cols-2 gap-6">
             {/* Pie chart */}
-            <Card className="border border-gray-100">
+            <Card className="border border-border">
               <CardContent className="p-6">
-                <h3 className="font-semibold text-gray-900 mb-6 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-gray-500" />
+                <h3 className="font-semibold text-foreground mb-6 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-muted-foreground" />
                   Spend by category
                 </h3>
                 <ResponsiveContainer width="100%" height={220}>
@@ -378,9 +419,9 @@ export default function BudgetPage() {
                           className="w-3 h-3 rounded-full flex-shrink-0"
                           style={{ backgroundColor: CATEGORY_COLORS[entry.category] || "#6b7280" }}
                         />
-                        <span className="text-gray-600">{entry.name}</span>
+                        <span className="text-muted-foreground">{entry.name}</span>
                       </div>
-                      <span className="font-medium text-gray-900">
+                      <span className="font-medium text-foreground">
                         €{entry.value.toLocaleString()}
                       </span>
                     </div>
@@ -390,10 +431,10 @@ export default function BudgetPage() {
             </Card>
 
             {/* Bar chart */}
-            <Card className="border border-gray-100">
+            <Card className="border border-border">
               <CardContent className="p-6">
-                <h3 className="font-semibold text-gray-900 mb-6 flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-gray-500" />
+                <h3 className="font-semibold text-foreground mb-6 flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-muted-foreground" />
                   Estimated vs Confirmed
                 </h3>
                 <ResponsiveContainer width="100%" height={280}>
@@ -420,9 +461,9 @@ export default function BudgetPage() {
           </div>
 
           {/* Category breakdown table */}
-          <Card className="border border-gray-100">
+          <Card className="border border-border">
             <CardContent className="p-6">
-              <h3 className="font-semibold text-gray-900 mb-4">Category breakdown</h3>
+              <h3 className="font-semibold text-foreground mb-4">Category breakdown</h3>
               <div className="space-y-3">
                 {event.expenses.map((expense) => {
                   const pct = event.budget
@@ -439,20 +480,20 @@ export default function BudgetPage() {
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between mb-1">
-                          <span className="text-sm font-medium text-gray-700">
+                          <span className="text-sm font-medium text-foreground">
                             {CATEGORY_LABELS[expense.category] || expense.label}
                           </span>
-                          <div className="text-sm text-gray-900 font-medium">
+                          <div className="text-sm text-foreground font-medium">
                             €{expense.estimated.toLocaleString()}
                             {expense.confirmed && expense.confirmed > 0 && (
-                              <span className="text-xs text-gray-500 ml-2">
+                              <span className="text-xs text-muted-foreground ml-2">
                                 (€{expense.confirmed.toLocaleString()} confirmed)
                               </span>
                             )}
                           </div>
                         </div>
                         {event.budget && (
-                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                             <div
                               className="h-full rounded-full"
                               style={{
@@ -466,7 +507,7 @@ export default function BudgetPage() {
                         )}
                       </div>
                       {event.budget && (
-                        <span className="text-xs text-gray-400 w-10 text-right flex-shrink-0">
+                        <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
                           {pct.toFixed(0)}%
                         </span>
                       )}

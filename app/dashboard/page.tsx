@@ -5,7 +5,24 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, MapPin, Users, Calendar, ArrowRight, Plane } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Plus,
+  MapPin,
+  Users,
+  Calendar,
+  ArrowRight,
+  Plane,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { format } from "date-fns";
 
 interface Event {
@@ -32,6 +49,21 @@ function getBudgetStatus(event: Event) {
 export default function DashboardPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/events/${deleteTarget.id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setEvents((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/events")
@@ -46,7 +78,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
@@ -55,11 +87,11 @@ export default function DashboardPage() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Events</h1>
-          <p className="text-gray-500 mt-1">Manage your corporate trips and events</p>
+          <h1 className="text-3xl font-bold text-foreground">Events</h1>
+          <p className="text-muted-foreground mt-1">Manage your corporate trips and events</p>
         </div>
         <Link href="/dashboard/events/new">
-          <Button className="bg-blue-600 hover:bg-blue-700 gap-2">
+          <Button className="bg-primary hover:bg-primary/90 gap-2">
             <Plus className="w-4 h-4" />
             New event
           </Button>
@@ -67,14 +99,14 @@ export default function DashboardPage() {
       </div>
 
       {events.length === 0 ? (
-        <div className="text-center py-20 border-2 border-dashed border-gray-200 rounded-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-4">
-            <Plane className="w-8 h-8 text-blue-400" />
+        <div className="text-center py-20 border-2 border-dashed border-border rounded-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <Plane className="w-8 h-8 text-primary/70" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No events yet</h3>
-          <p className="text-gray-500 mb-6">Create your first corporate event and let AI handle the planning.</p>
+          <h3 className="text-xl font-semibold text-foreground mb-2">No events yet</h3>
+          <p className="text-muted-foreground mb-6">Create your first corporate event and let AI handle the planning.</p>
           <Link href="/dashboard/events/new">
-            <Button className="bg-blue-600 hover:bg-blue-700 gap-2">
+            <Button className="bg-primary hover:bg-primary/90 gap-2">
               <Plus className="w-4 h-4" />
               Create your first event
             </Button>
@@ -87,11 +119,11 @@ export default function DashboardPage() {
             const totalEstimated = event.expenses.reduce((s, e) => s + e.estimated, 0);
 
             return (
-              <Card key={event.id} className="border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all group">
+              <Card key={event.id} className="border border-border hover:border-primary/35 hover:shadow-md transition-all group">
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between mb-4">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                      <MapPin className="w-5 h-5 text-blue-600" />
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <MapPin className="w-5 h-5 text-primary" />
                     </div>
                     {budgetStatus && (
                       <Badge variant={budgetStatus.variant} className="text-xs">
@@ -99,37 +131,37 @@ export default function DashboardPage() {
                       </Badge>
                     )}
                   </div>
-                  <h3 className="font-semibold text-gray-900 text-lg mb-1 line-clamp-1">
+                  <h3 className="font-semibold text-foreground text-lg mb-1 line-clamp-1">
                     {event.name}
                   </h3>
-                  <p className="text-blue-600 font-medium text-sm mb-4">
+                  <p className="text-primary font-medium text-sm mb-4">
                     {event.destination}
                   </p>
-                  <div className="space-y-2 text-sm text-gray-600 mb-5">
+                  <div className="space-y-2 text-sm text-muted-foreground mb-5">
                     <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-gray-400" />
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
                       {format(new Date(event.startDate), "MMM d")} –{" "}
                       {format(new Date(event.endDate), "MMM d, yyyy")}
                     </div>
                     <div className="flex items-center gap-2">
-                      <Users className="w-4 h-4 text-gray-400" />
+                      <Users className="w-4 h-4 text-muted-foreground" />
                       {event.participants} participants
                     </div>
                   </div>
                   {event.budget && (
                     <div className="mb-4">
-                      <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <div className="flex justify-between text-xs text-muted-foreground mb-1">
                         <span>Budget usage</span>
                         <span>€{totalEstimated.toLocaleString()} / €{event.budget.toLocaleString()}</span>
                       </div>
-                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all ${
                             totalEstimated > event.budget
                               ? "bg-red-500"
                               : totalEstimated / event.budget > 0.9
                               ? "bg-yellow-500"
-                              : "bg-blue-500"
+                              : "bg-primary/100"
                           }`}
                           style={{
                             width: `${Math.min(100, (totalEstimated / event.budget) * 100)}%`,
@@ -138,18 +170,82 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   )}
-                  <Link href={`/dashboard/events/${event.id}`}>
-                    <Button variant="ghost" size="sm" className="w-full group-hover:bg-blue-50 gap-2">
-                      Open event
-                      <ArrowRight className="w-4 h-4" />
-                    </Button>
-                  </Link>
+                  <div className="flex flex-col gap-2">
+                    <Link href={`/dashboard/events/${event.id}`} className="w-full">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full group-hover:bg-primary/10 gap-2"
+                      >
+                        Open event
+                        <ArrowRight className="w-4 h-4" />
+                      </Button>
+                    </Link>
+                    <div className="flex gap-2">
+                      <Link href={`/dashboard/events/${event.id}/edit`} className="flex-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Edit
+                        </Button>
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="flex-1 gap-1.5"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDeleteTarget({ id: event.id, name: event.name });
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             );
           })}
         </div>
       )}
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete event?</DialogTitle>
+            <DialogDescription>
+              {deleteTarget && (
+                <>
+                  Permanently remove{" "}
+                  <span className="font-medium text-foreground">{deleteTarget.name}</span> and all
+                  related data. This cannot be undone.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
