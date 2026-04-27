@@ -86,8 +86,16 @@ Open [http://localhost:3000](http://localhost:3000)
 - **Landing page** — marketing page with CTA, features, how-it-works, testimonials
 - **Events dashboard** — create, **edit**, **delete**, and open corporate events
 - **AI itinerary generator** — Planning Agent builds day-by-day schedules with tool calls visible in real time; vendor rows can include **grounding links** (Flights / Hotels / Maps) from search tool metadata; saved JSON includes **quote time**, **stale-after hints**, **data provenance**, and optional **flight tracking** links (discovery / FR24-style URLs — not a live PNR)
+- **Itinerary versioning & restore** — each save creates a version; **Activity** page restores a snapshot and re-syncs expenses
+- **Plan lifecycle** — `DRAFT` / `PENDING_REVIEW` / `APPROVED`, **approve** from the event hub, **audit log** for key actions
+- **Budget copilot** — streaming assistant on the budget page; can **queue planning notes** for the next regeneration (merged server-side with `preferences`)
+- **Finance freshness** — `budgetReviewStale` after itinerary save or invoice upload; **auto finance pass** after itinerary generation; manual refresh when stale or optional narrative re-run
+- **Exports** — CSV line items, **ICS** calendar blocks per trip day, **printable HTML** (browser → PDF)
+- **Comments** — threaded-style comments on the event (stored with author name from header / UI)
+- **Workspace & billing (demo)** — default org + `FREE` subscription row; `/dashboard/billing` shows plan snapshot (Stripe wiring is a production step)
+- **Actor header** — set **Your name** in the dashboard header; sent as `x-travelops-actor` for audit attribution
 - **Vendor discovery** — hotels, flights, activities, restaurants across major European cities
-- **Budget dashboard** — pie chart, estimated vs confirmed bar chart, real-time alerts
+- **Budget dashboard** — pie chart, estimated vs confirmed bar chart, real-time alerts; **line-item allocations** per category when synced from itinerary
 - **Invoice processing** — drag-and-drop upload, Finance Agent OCR via Gemini Vision
 - **Real-time streaming** — watch agents think and call tools as they work
 
@@ -111,18 +119,23 @@ app/
   page.tsx                    ← Landing page
   dashboard/
     page.tsx                  ← Events list
+    billing/page.tsx          ← Plan / subscription snapshot (demo)
     events/
       new/page.tsx            ← Create event form
       [id]/
         page.tsx              ← Event overview (edit / delete)
         edit/page.tsx         ← Edit event form
         itinerary/page.tsx    ← Planning Agent + itinerary
-        budget/page.tsx       ← Finance dashboard
+        budget/page.tsx       ← Finance + budget copilot
         invoices/page.tsx     ← Invoice upload & OCR
+        activity/page.tsx     ← Versions + audit log
   api/
-    events/                   ← Event CRUD
+    events/                   ← Event CRUD + nested routes (comments, audit, versions, export)
     agents/planning/          ← Planning Agent endpoint
     agents/finance/           ← Finance Agent endpoint
+    agents/budget-copilot/    ← Legacy alias → event assistant stream
+    agents/event-assistant/   ← Event assistant (budget + constraints, chat history)
+    billing/                  ← Workspace subscription snapshot
     invoices/upload/          ← File upload endpoint
 lib/
   agents/

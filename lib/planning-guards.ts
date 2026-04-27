@@ -16,6 +16,7 @@ export function hotelNightCount(checkIn: string, checkOut: string): number {
 
 export type ItineraryShape = {
   days: Array<{
+    date?: string;
     items: Array<{
       type: string;
       estimatedCost: number;
@@ -62,10 +63,37 @@ export function countFlights(itinerary: ItineraryShape): number {
   return n;
 }
 
+/** Reject day rows whose `date` falls outside the event window (YYYY-MM-DD). */
+export function validateItineraryDayDates(
+  itinerary: ItineraryShape,
+  startDate: string,
+  endDate: string
+): { ok: true } | { ok: false; error: string } {
+  const start = new Date(`${startDate}T12:00:00.000Z`).getTime();
+  const end = new Date(`${endDate}T12:00:00.000Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return { ok: true };
+
+  for (const day of itinerary.days) {
+    const raw = day.date?.trim();
+    if (!raw) continue;
+    const t = new Date(`${raw}T12:00:00.000Z`).getTime();
+    if (!Number.isFinite(t)) continue;
+    if (t < start || t > end) {
+      return {
+        ok: false,
+        error: `Itinerary day "${raw}" is outside the event dates ${startDate}–${endDate}. Regenerate with days aligned to the trip window.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
 export function validateItineraryForSave(
   itinerary: ItineraryShape,
   policy: {
     budget?: number;
+    /** Stricter ceiling than approved budget (structured caps / savings intent). */
+    effectiveBudgetCap?: number;
     startDate: string;
     endDate: string;
     destination: string;
@@ -89,10 +117,25 @@ export function validateItineraryForSave(
     };
   }
 
-  if (policy.budget != null && policy.budget > 0 && sumItems > policy.budget) {
+  const ceiling =
+    policy.effectiveBudgetCap != null &&
+    policy.effectiveBudgetCap > 0 &&
+    Number.isFinite(policy.effectiveBudgetCap)
+      ? policy.effectiveBudgetCap
+      : policy.budget != null && policy.budget > 0
+        ? policy.budget
+        : undefined;
+
+  if (ceiling != null && sumItems > ceiling) {
+    const label =
+      policy.effectiveBudgetCap != null &&
+      policy.effectiveBudgetCap > 0 &&
+      policy.effectiveBudgetCap < (policy.budget ?? Infinity)
+        ? `planning target (€${ceiling}, under the approved €${policy.budget ?? ceiling} budget)`
+        : `approved budget of €${ceiling}`;
     return {
       ok: false,
-      error: `Itinerary total €${sumItems} exceeds the approved budget of €${policy.budget}. Replace premium picks with lower-priced options from your search tool results (hotels, restaurants, flights) until the sum is at or under budget, then save again.`,
+      error: `Itinerary total €${sumItems} exceeds the ${label}. Replace premium picks with lower-priced options from your search tool results until the sum is at or under the ceiling, then save again.`,
     };
   }
 

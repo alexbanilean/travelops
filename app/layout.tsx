@@ -38,7 +38,7 @@ export default function RootLayout({
       className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-dvh flex flex-col bg-background text-foreground">
+      <body className="flex min-h-dvh flex-col bg-background text-foreground">
         <ThemeProvider>
           {/* Subtle mesh so glass headers have depth (glassmorphism) */}
           <div
@@ -47,7 +47,7 @@ export default function RootLayout({
           >
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,oklch(0.62_0.19_252/0.35),transparent)] dark:bg-[radial-gradient(ellipse_100%_60%_at_80%_0%,oklch(0.76_0.19_152/0.12),transparent)]" />
           </div>
-          <div className="relative flex min-h-dvh flex-1 flex-col">{children}</div>
+          <div className="relative flex min-h-0 flex-1 flex-col">{children}</div>
         </ThemeProvider>
       </body>
     </html>

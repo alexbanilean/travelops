@@ -12,17 +12,8 @@ import { searchHotels } from "@/lib/tools/search-hotels";
 import { searchFlights } from "@/lib/tools/search-flights";
 import { searchActivities } from "@/lib/tools/search-activities";
 import { searchRestaurants } from "@/lib/tools/search-restaurants";
-import { prisma } from "@/lib/db";
-import {
-  hotelNightCount,
-  suggestedHotelMaxPerNight,
-  sumLineItemCosts,
-  validateItineraryForSave,
-} from "@/lib/planning-guards";
-import {
-  DATA_PROVENANCE_SYNTHETIC_DEMO,
-  DEMO_PRICING_DISCLAIMER,
-} from "@/lib/travel-data-provenance";
+import { hotelNightCount, suggestedHotelMaxPerNight } from "@/lib/planning-guards";
+import { persistItineraryForEvent } from "@/lib/persist-itinerary";
 
 export const PLANNING_SYSTEM_PROMPT = `You are TravelOps Planning Agent — a principal-level corporate travel planner for regulated, budget-conscious companies.
 
@@ -64,6 +55,10 @@ const ItinerarySourceSchema = z.object({
 });
 
 const ItineraryItemSchema = z.object({
+  id: z
+    .string()
+    .optional()
+    .describe("Stable line id (e.g. L-d1-i0); omit to let the server assign"),
   time: z.string(),
   type: z.enum(["flight", "hotel", "activity", "restaurant", "other"]),
   name: z.string(),
@@ -116,22 +111,44 @@ function buildPlanningUserPrompt(params: {
   endDate: string;
   participants: number;
   budget?: number;
+  /** Tighter ceiling than approved budget (structured caps / savings intent). */
+  effectiveBudgetCeiling?: number;
+  /** Structured JSON-derived lines only (free-text notes stay in preferences). */
+  planningConstraintBlock?: string;
   preferences?: string;
   origin?: string;
 }): string {
   const origin = params.origin?.trim() || "Bucharest, Romania";
   const nights = hotelNightCount(params.startDate, params.endDate);
+  const approved = params.budget != null && params.budget > 0 ? params.budget : undefined;
+  const strict =
+    params.effectiveBudgetCeiling != null &&
+    params.effectiveBudgetCeiling > 0 &&
+    Number.isFinite(params.effectiveBudgetCeiling)
+      ? params.effectiveBudgetCeiling
+      : approved;
+
   const hotelCap = suggestedHotelMaxPerNight(
-    params.budget,
+    strict,
     params.participants,
     nights
   );
 
   const budgetBlock =
-    params.budget != null && params.budget > 0
-      ? `- Approved **total event budget**: €${params.budget} (hard ceiling — sum of all line-item estimatedCost must be ≤ this before save)
+    strict != null && strict > 0
+      ? approved != null &&
+        approved > 0 &&
+        strict < approved - 0.01
+        ? `- Approved **finance budget**: €${approved}
+- **Planning ceiling** (hard before save): €${strict} — sum of all line-item estimatedCost must be ≤ this (stricter than finance cap when the team queued savings or caps)
+- Suggested **searchHotels maxPricePerNight**: €${hotelCap ?? "—"} (~32% of planning ceiling ÷ ${nights} hotel night(s) ÷ rooms; pass this into searchHotels)`
+        : `- Approved **total event budget**: €${strict} (hard ceiling — sum of all line-item estimatedCost must be ≤ this before save)
 - Suggested **searchHotels maxPricePerNight**: €${hotelCap ?? "—"} (~32% of budget ÷ ${nights} hotel night(s) ÷ rooms; pass this into searchHotels)`
       : "- No fixed budget was set; still ground all EUR amounts in tool results";
+
+  const structuredExtra = params.planningConstraintBlock?.trim()
+    ? `\n- Structured caps (machine-checked on save):\n${params.planningConstraintBlock.trim()}`
+    : "";
 
   return `Plan and persist a corporate event with these facts:
 
@@ -140,7 +157,7 @@ function buildPlanningUserPrompt(params: {
 - Participants: ${params.participants}
 - Origin (home / travel-from): ${origin}
 ${budgetBlock}
-${params.preferences ? `- Preferences / constraints: ${params.preferences}` : ""}
+${params.preferences ? `- Preferences / constraints: ${params.preferences}` : ""}${structuredExtra}
 
 ## Search checklist (run before composing JSON)
 1. **searchFlights** — outbound: "${origin}" → "${params.destination}" on **${params.startDate}**.
@@ -165,8 +182,12 @@ export function createPlanningAgentStream(params: {
   endDate: string;
   participants: number;
   budget?: number;
+  effectiveBudgetCeiling?: number;
+  planningConstraintBlock?: string;
   preferences?: string;
   origin?: string;
+  /** For audit trail on itinerary save */
+  actorName?: string;
 }) {
   return streamText({
     ...createPlanningAgentStreamLogHooks({
@@ -178,7 +199,17 @@ export function createPlanningAgentStream(params: {
     maxRetries: getGeminiMaxRetries(),
     prepareStep: createGeminiPrepareStep(),
     stopWhen: stepCountIs(10),
-    prompt: buildPlanningUserPrompt(params),
+    prompt: buildPlanningUserPrompt({
+      destination: params.destination,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      participants: params.participants,
+      budget: params.budget,
+      effectiveBudgetCeiling: params.effectiveBudgetCeiling,
+      planningConstraintBlock: params.planningConstraintBlock,
+      preferences: params.preferences,
+      origin: params.origin,
+    }),
     tools: {
       searchFlights: {
         description:
@@ -260,107 +291,37 @@ export function createPlanningAgentStream(params: {
         execute: async (args: { itinerary: z.infer<typeof ItinerarySchema> }) => {
           const { itinerary } = args;
           const eventId = params.eventId;
-
           const originCity = params.origin?.trim() || "Bucharest";
 
-          const gate = validateItineraryForSave(itinerary, {
-            budget: params.budget ?? undefined,
-            startDate: params.startDate,
-            endDate: params.endDate,
-            destination: params.destination,
-            originCity,
+          const result = await persistItineraryForEvent({
+            eventId,
+            itinerary,
+            policy: {
+              budget: params.budget ?? undefined,
+              startDate: params.startDate,
+              endDate: params.endDate,
+              destination: params.destination,
+              originCity,
+            },
+            actorName: params.actorName?.trim() || "Planning agent",
           });
-          if (!gate.ok) {
-            createAgentLogger("planning").warn("saveItinerary rejected by policy", {
+
+          if (!result.ok) {
+            createAgentLogger("planning").warn("saveItinerary rejected or failed", {
               eventId,
-              reason: gate.error,
-              sumLineItems: sumLineItemCosts(itinerary),
-              declared: itinerary.totalEstimatedCost,
+              reason: result.error,
             });
             return {
               success: false as const,
-              error: gate.error,
+              error: result.error,
             };
-          }
-
-          const event = await prisma.event.findUnique({
-            where: { id: eventId },
-          });
-          if (!event) {
-            createAgentLogger("planning").warn("saveItinerary: event not found", {
-              eventId,
-            });
-            return {
-              success: false as const,
-              error: `Event not found (id: ${eventId}). Itinerary was not saved.`,
-            };
-          }
-
-          const savedAt = new Date().toISOString();
-          const enrichedItinerary = {
-            ...itinerary,
-            itineraryQuotedAt: savedAt,
-            dataProvenance: DATA_PROVENANCE_SYNTHETIC_DEMO,
-            pricingTrustNote: DEMO_PRICING_DISCLAIMER,
-          };
-
-          await prisma.event.update({
-            where: { id: eventId },
-            data: { itinerary: JSON.stringify(enrichedItinerary) },
-          });
-
-          const categoryTotals: Record<string, number> = {
-            transport: 0,
-            accommodation: 0,
-            activities: 0,
-            food: 0,
-          };
-
-          for (const day of enrichedItinerary.days) {
-            for (const item of day.items) {
-              const cat =
-                item.type === "flight"
-                  ? "transport"
-                  : item.type === "hotel"
-                  ? "accommodation"
-                  : item.type === "activity"
-                  ? "activities"
-                  : item.type === "restaurant"
-                  ? "food"
-                  : "activities";
-              categoryTotals[cat] =
-                (categoryTotals[cat] || 0) + item.estimatedCost;
-            }
-          }
-
-          for (const [category, estimated] of Object.entries(categoryTotals)) {
-            if (estimated > 0) {
-              const existing = await prisma.expense.findFirst({
-                where: { eventId, category },
-              });
-              if (existing) {
-                await prisma.expense.update({
-                  where: { id: existing.id },
-                  data: { estimated },
-                });
-              } else {
-                await prisma.expense.create({
-                  data: {
-                    eventId,
-                    category,
-                    label:
-                      category.charAt(0).toUpperCase() + category.slice(1),
-                    estimated,
-                  },
-                });
-              }
-            }
           }
 
           return {
             success: true as const,
             message: "Itinerary saved successfully",
-            totalCost: itinerary.totalEstimatedCost,
+            totalCost: result.totalCost,
+            versionNumber: result.versionNumber,
           };
         },
       },

@@ -6,33 +6,123 @@ datasource db {
   provider = "sqlite"
 }
 
-model Event {
-  id           String    @id @default(cuid())
+model Organization {
+  id           String            @id @default(cuid())
   name         String
-  destination  String
-  startDate    DateTime
-  endDate      DateTime
-  participants Int
-  budget       Float?
-  preferences  String?
-  itinerary    String?
-  createdAt    DateTime  @default(now())
-  expenses     Expense[]
-  invoices     Invoice[]
+  createdAt    DateTime          @default(now())
+  members      WorkspaceMember[]
+  events       Event[]
+  subscription Subscription?
+  auditLogs    AuditLog[]
+}
+
+model WorkspaceMember {
+  id             String       @id @default(cuid())
+  orgId          String
+  displayName    String
+  email          String?
+  role           String       @default("OWNER")
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model Subscription {
+  id               String       @id @default(cuid())
+  organizationId   String       @unique
+  planTier         String       @default("FREE")
+  status           String       @default("none")
+  stripeCustomerId String?
+  currentPeriodEnd DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Event {
+  id                     String             @id @default(cuid())
+  name                   String
+  destination            String
+  startDate              DateTime
+  endDate                DateTime
+  participants           Int
+  budget                 Float?
+  preferences            String?
+  itinerary              String?
+  createdAt              DateTime           @default(now())
+  organizationId       String?
+  organization         Organization?      @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  planningStatus       String             @default("DRAFT")
+  approvedAt           DateTime?
+  approvedByName       String?
+  pendingPlanningNotes   String?
+  planningConstraintsJson String?
+  budgetReviewStale    Boolean            @default(false)
+  itineraryUpdatedAt   DateTime?
+  lastFinanceReviewAt  DateTime?
+  expenses               Expense[]
+  invoices               Invoice[]
+  itineraryVersions    ItineraryVersion[]
+  comments               EventComment[]
+  auditLogs              AuditLog[]
+
+  @@index([organizationId])
+}
+
+model ItineraryVersion {
+  id             String   @id @default(cuid())
+  eventId        String
+  versionNumber  Int
+  itineraryJson  String
+  totalEstimated Float
+  summaryLine    String
+  createdAt      DateTime @default(now())
+  event          Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, versionNumber])
+  @@index([eventId])
+}
+
+model EventComment {
+  id         String   @id @default(cuid())
+  eventId    String
+  authorName String
+  body       String
+  createdAt  DateTime @default(now())
+  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  eventId        String?
+  organizationId String?
+  actorName      String
+  action         String
+  payload        String?
+  createdAt      DateTime      @default(now())
+  event          Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([eventId])
+  @@index([organizationId])
 }
 
 model Expense {
-  id        String  @id @default(cuid())
-  eventId   String
-  category  String
-  label     String
-  estimated Float
-  confirmed Float?
-  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id               String  @id @default(cuid())
+  eventId          String
+  category         String
+  label            String
+  estimated        Float
+  confirmed        Float?
+  lineAllocations  String?
+  event            Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
 }
 
 model Invoice {
-  id        String    @id @default(cuid())
+  id        String  @id @default(cuid())
   eventId   String
   filename  String
   vendor    String?
@@ -40,5 +130,5 @@ model Invoice {
   category  String?
   date      String?
   rawData   String?
-  event     Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
 }

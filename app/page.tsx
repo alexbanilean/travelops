@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { LandingHeaderActions } from "@/components/landing-header-actions";
 import {
   MapPin,
   Brain,
@@ -66,26 +66,7 @@ export default function LandingPage() {
                 Pricing
               </a>
             </nav>
-            <div className="flex items-center gap-1 sm:gap-2">
-              <ThemeToggle />
-              <Link href="/dashboard">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="cursor-pointer text-muted-foreground hover:text-foreground"
-                >
-                  Sign in
-                </Button>
-              </Link>
-              <Link href="/dashboard/events/new">
-                <Button
-                  size="sm"
-                  className="cursor-pointer bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-                >
-                  Start free trial
-                </Button>
-              </Link>
-            </div>
+            <LandingHeaderActions />
           </div>
         </header>
       </div>

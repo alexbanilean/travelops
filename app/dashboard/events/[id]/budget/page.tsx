@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { splitAgentStreamPayload } from "@/lib/agent-stream-protocol";
+import { actorHeaders } from "@/lib/browser-actor";
 import {
   ArrowLeft,
   Receipt,
@@ -38,6 +39,7 @@ interface Expense {
   label: string;
   estimated: number;
   confirmed: number | null;
+  lineAllocations?: string | null;
 }
 
 interface Event {
@@ -46,6 +48,8 @@ interface Event {
   destination: string;
   budget: number | null;
   expenses: Expense[];
+  budgetReviewStale?: boolean;
+  lastFinanceReviewAt?: string | null;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -73,14 +77,24 @@ export default function BudgetPage() {
   const [streamError, setStreamError] = useState("");
   const [agentDone, setAgentDone] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
-
   const fetchEvent = () => {
-    fetch(`/api/events/${id}`)
+    fetch(`/api/events/${id}`, { headers: { ...actorHeaders() } })
       .then((r) => r.json())
       .then((data) => {
         setEvent(data);
         setLoading(false);
       });
+  };
+
+  const markFinanceReviewed = async () => {
+    await fetch(`/api/events/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...actorHeaders() },
+      body: JSON.stringify({
+        lastFinanceReviewAt: new Date().toISOString(),
+        budgetReviewStale: false,
+      }),
+    });
   };
 
   useEffect(() => {
@@ -103,7 +117,7 @@ export default function BudgetPage() {
     try {
       const res = await fetch("/api/agents/finance", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...actorHeaders() },
         body: JSON.stringify({ eventId: event.id, action: "estimate" }),
       });
 
@@ -145,7 +159,10 @@ export default function BudgetPage() {
       setStreamText(displayText);
       if (finalErr) setStreamError(finalErr);
       setAgentDone(true);
-      if (!finalErr) fetchEvent();
+      if (!finalErr) {
+        await markFinanceReviewed();
+        fetchEvent();
+      }
     } catch (err) {
       console.error(err);
       setStreamError(
@@ -187,6 +204,18 @@ export default function BudgetPage() {
   const isAtRisk = utilizationPct > 90 && utilizationPct <= 100;
   const isOverBudget = utilizationPct > 100;
 
+  const needsFinanceRefresh =
+    event.expenses.length === 0 ||
+    event.budgetReviewStale === true ||
+    !event.lastFinanceReviewAt;
+
+  const financeLabel =
+    event.expenses.length === 0
+      ? "Estimate budget"
+      : event.budgetReviewStale
+        ? "Refresh finance review"
+        : "Re-run narrative (optional)";
+
   return (
     <div>
       <Link
@@ -197,93 +226,53 @@ export default function BudgetPage() {
         Back to event
       </Link>
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Budget</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Budget</h1>
           <p className="text-muted-foreground mt-1">{event.name} · {event.destination}</p>
+          {event.budgetReviewStale && event.expenses.length > 0 && (
+            <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+              Itinerary or invoices changed since the last finance pass — run a refresh to sync the narrative.
+            </p>
+          )}
         </div>
         <Button
           onClick={runFinanceAgent}
           disabled={estimating}
-          className="bg-emerald-600 hover:bg-emerald-700 gap-2"
+          variant={needsFinanceRefresh ? "default" : "outline"}
+          className={
+            needsFinanceRefresh
+              ? "gap-2 bg-emerald-600 hover:bg-emerald-700"
+              : "gap-2 border-emerald-300 text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+          }
         >
           {estimating ? (
             <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
               Analyzing...
             </>
           ) : (
             <>
-              <Sparkles className="w-4 h-4" />
-              {event.expenses.length > 0 ? "Refresh analysis" : "Estimate budget"}
+              <Sparkles className="h-4 w-4" />
+              {financeLabel}
             </>
           )}
         </Button>
       </div>
 
-      {/* Finance agent stream */}
-      {(estimating || streamText || streamError) && (
-        <Card className="border border-emerald-100 mb-8">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center">
-                <Brain className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <div className="font-semibold text-foreground text-sm">Finance Agent</div>
-                <div className="text-xs text-muted-foreground">Powered by Google Gemini</div>
-              </div>
-              {estimating && (
-                <div className="ml-auto flex items-center gap-2 text-xs text-emerald-600">
-                  <div className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                  Analyzing finances...
-                </div>
-              )}
-              {agentDone && !estimating && !streamError && (
-                <div className="ml-auto flex items-center gap-2 text-xs text-green-600">
-                  <CheckCircle className="w-4 h-4" />
-                  Analysis complete
-                </div>
-              )}
-              {agentDone && !estimating && streamError && (
-                <div className="ml-auto flex items-center gap-2 text-xs text-destructive">
-                  <AlertTriangle className="w-4 h-4" />
-                  Failed
-                </div>
-              )}
-            </div>
-            {streamError && (
-              <Alert variant="destructive" className="mb-4">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>{streamError}</AlertDescription>
-              </Alert>
-            )}
-            <div
-              ref={chatRef}
-              className="max-h-40 overflow-y-auto bg-muted/50 rounded-lg p-4 text-sm text-foreground font-mono leading-relaxed whitespace-pre-wrap"
-            >
-              {streamText || <span className="text-muted-foreground italic">Initializing Finance Agent...</span>}
-              {estimating && (
-                <span className="inline-block w-2 h-4 bg-emerald-500 ml-1 animate-pulse" />
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Budget alerts */}
       {isOverBudget && (
-        <Alert className="mb-6 border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <AlertDescription className="text-red-700">
+        <Alert className="mb-6 border-red-200 bg-red-50 dark:border-red-900/60 dark:bg-red-950/40">
+          <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />
+          <AlertDescription className="text-red-800 dark:text-red-100">
             <strong>Budget exceeded:</strong> Estimated costs (€{totalEstimated.toLocaleString()}) exceed the approved budget by €{(totalEstimated - (event.budget || 0)).toLocaleString()}.
           </AlertDescription>
         </Alert>
       )}
       {isAtRisk && !isOverBudget && (
-        <Alert className="mb-6 border-yellow-200 bg-yellow-50">
-          <AlertTriangle className="h-4 w-4 text-yellow-600" />
-          <AlertDescription className="text-yellow-700">
+        <Alert className="mb-6 border-yellow-200 bg-yellow-50 dark:border-yellow-900/50 dark:bg-yellow-950/35">
+          <AlertTriangle className="h-4 w-4 text-yellow-700 dark:text-yellow-300" />
+          <AlertDescription className="text-yellow-900 dark:text-yellow-100">
             <strong>Budget at risk:</strong> You&apos;ve used {utilizationPct.toFixed(0)}% of your budget. Only €{remaining?.toLocaleString()} remaining.
           </AlertDescription>
         </Alert>
@@ -334,7 +323,8 @@ export default function BudgetPage() {
           </div>
           <h3 className="text-xl font-semibold text-foreground mb-2">No budget data yet</h3>
           <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
-            Generate an itinerary first, then click "Estimate budget" to let the Finance Agent analyze costs.
+            Generate an itinerary first, then click &ldquo;Estimate budget&rdquo; to let the Finance Agent
+            analyze costs.
           </p>
           <Button
             onClick={runFinanceAgent}
@@ -505,6 +495,29 @@ export default function BudgetPage() {
                             />
                           </div>
                         )}
+                        {(() => {
+                          if (!expense.lineAllocations) return null;
+                          try {
+                            const lines = JSON.parse(expense.lineAllocations) as Array<{
+                              lineKey: string;
+                              label: string;
+                              amount: number;
+                            }>;
+                            if (!Array.isArray(lines) || lines.length === 0) return null;
+                            return (
+                              <ul className="mt-2 space-y-0.5 text-[11px] text-muted-foreground">
+                                {lines.map((ln) => (
+                                  <li key={ln.lineKey}>
+                                    <span className="font-mono text-[10px]">{ln.lineKey}</span>{" "}
+                                    {ln.label} — €{ln.amount.toLocaleString()}
+                                  </li>
+                                ))}
+                              </ul>
+                            );
+                          } catch {
+                            return null;
+                          }
+                        })()}
                       </div>
                       {event.budget && (
                         <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
@@ -519,6 +532,76 @@ export default function BudgetPage() {
           </Card>
         </div>
       )}
+
+      <section className="mt-10 space-y-6" aria-labelledby="budget-assist-heading">
+        <div>
+          <h2
+            id="budget-assist-heading"
+            className="text-lg font-semibold tracking-tight text-foreground"
+          >
+            Guidance & automation
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Use the assistant in the right rail (or the Assistant button on mobile) for budget questions,
+            structured caps, and notes for the next itinerary run. Finance narrative appears below when you
+            run the estimator.
+          </p>
+        </div>
+
+        {(estimating || streamText || streamError) && (
+          <Card className="border border-emerald-200/80 bg-emerald-50/30 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+            <CardContent className="p-6">
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-600">
+                  <Brain className="size-4 text-white" aria-hidden />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-foreground">Finance Agent</div>
+                  <div className="text-xs text-muted-foreground">Powered by Google Gemini</div>
+                </div>
+                {estimating && (
+                  <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
+                    <div className="size-2 animate-pulse rounded-full bg-emerald-600" aria-hidden />
+                    Analyzing finances…
+                  </div>
+                )}
+                {agentDone && !estimating && !streamError && (
+                  <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400">
+                    <CheckCircle className="size-4 shrink-0" aria-hidden />
+                    Analysis complete
+                  </div>
+                )}
+                {agentDone && !estimating && streamError && (
+                  <div className="flex items-center gap-2 text-xs text-destructive">
+                    <AlertTriangle className="size-4 shrink-0" aria-hidden />
+                    Failed
+                  </div>
+                )}
+              </div>
+              {streamError && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>{streamError}</AlertDescription>
+                </Alert>
+              )}
+              <div
+                ref={chatRef}
+                className="max-h-48 overflow-y-auto rounded-lg border border-border/60 bg-background/80 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap text-foreground dark:bg-background/50"
+              >
+                {streamText || (
+                  <span className="italic text-muted-foreground">Initializing Finance Agent…</span>
+                )}
+                {estimating && (
+                  <span
+                    className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-emerald-600"
+                    aria-hidden
+                  />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </section>
     </div>
   );
 }

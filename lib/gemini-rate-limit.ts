@@ -31,6 +31,20 @@ export function getGeminiMaxRetries(): number {
 	return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+/**
+ * Event assistant uses short user messages; 503 "high demand" on preview models is common.
+ * SDK retries with backoff — separate from {@link getGeminiMaxRetries} (often 0 for planning 429).
+ * Set to 0 to disable. Cap 10.
+ */
+export function getGeminiEventAssistantMaxRetries(): number {
+	const raw = process.env.GOOGLE_GENERATIVE_AI_EVENT_ASSISTANT_MAX_RETRIES;
+	if (raw === "0" || raw === "off" || raw === "false") return 0;
+	if (raw === undefined || raw === "") return 5;
+	const n = Number.parseInt(raw, 10);
+	if (!Number.isFinite(n) || n < 0) return 5;
+	return Math.min(n, 10);
+}
+
 /** Throttle multi-step agent loops so Google RPM limits are not exceeded. */
 export function createGeminiPrepareStep<
 	T extends ToolSet,

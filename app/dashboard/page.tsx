@@ -24,6 +24,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
+import { actorHeaders } from "@/lib/browser-actor";
 
 interface Event {
   id: string;
@@ -56,7 +57,10 @@ export default function DashboardPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/events/${deleteTarget.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/events/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { ...actorHeaders() },
+      });
       if (!res.ok) return;
       setEvents((prev) => prev.filter((e) => e.id !== deleteTarget.id));
       setDeleteTarget(null);
@@ -66,7 +70,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    fetch("/api/events")
+    fetch("/api/events", { headers: { ...actorHeaders() } })
       .then((r) => r.json())
       .then((data) => {
         setEvents(data);

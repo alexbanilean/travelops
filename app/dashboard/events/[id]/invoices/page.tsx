@@ -19,6 +19,7 @@ import {
   X,
   AlertTriangle,
 } from "lucide-react";
+import { actorHeaders } from "@/lib/browser-actor";
 
 interface Invoice {
   id: string;
@@ -56,7 +57,7 @@ export default function InvoicesPage() {
   const [financeAgentError, setFinanceAgentError] = useState("");
 
   const fetchEvent = useCallback(() => {
-    fetch(`/api/events/${id}`)
+    fetch(`/api/events/${id}`, { headers: { ...actorHeaders() } })
       .then((r) => r.json())
       .then((data) => {
         setEvent(data);
@@ -81,6 +82,7 @@ export default function InvoicesPage() {
       try {
         const res = await fetch("/api/invoices/upload", {
           method: "POST",
+          headers: { ...actorHeaders() },
           body: formData,
         });
 
@@ -104,7 +106,7 @@ export default function InvoicesPage() {
     try {
       const res = await fetch("/api/agents/finance", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...actorHeaders() },
         body: JSON.stringify({
           eventId: id,
           action: "processInvoice",

@@ -17,6 +17,7 @@ import {
   Save,
 } from "lucide-react";
 import Link from "next/link";
+import { actorHeaders } from "@/lib/browser-actor";
 
 function toInputDate(iso: string): string {
   try {
@@ -44,7 +45,7 @@ export default function EditEventPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/events/${id}`)
+    fetch(`/api/events/${id}`, { headers: { ...actorHeaders() } })
       .then((r) => {
         if (!r.ok) throw new Error("not found");
         return r.json();
@@ -81,7 +82,7 @@ export default function EditEventPage() {
     try {
       const res = await fetch(`/api/events/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...actorHeaders() },
         body: JSON.stringify({
           name: form.name,
           destination: form.destination,

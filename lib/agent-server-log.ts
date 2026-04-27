@@ -5,6 +5,12 @@ export type AgentLogScope =
   | "finance-api"
   | "planning-stream"
   | "finance-stream"
+  | "budget-copilot"
+  | "budget-copilot-api"
+  | "budget-copilot-stream"
+  | "event-assistant"
+  | "event-assistant-api"
+  | "event-assistant-stream"
   | "gemini-rate-limit";
 
 /**

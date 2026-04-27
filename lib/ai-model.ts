@@ -12,6 +12,10 @@
  * If you hit **GenerateRequestsPerDayPerProjectPerModel** (e.g. limit 20/day for one model),
  * switching to another model id above usually gives you a fresh per-model daily allowance.
  *
+ * **503 / "high demand" / UNAVAILABLE** — common on preview/experimental ids (e.g.
+ * `gemini-*-preview*`). Prefer a stable GA id such as `gemini-2.5-flash` for production.
+ * The event assistant also retries with backoff (see `GOOGLE_GENERATIVE_AI_EVENT_ASSISTANT_MAX_RETRIES`).
+ *
  * Also confirm the Generative Language API is enabled for your Google Cloud project
  * linked to the API key (Google AI Studio → API key → project).
  */

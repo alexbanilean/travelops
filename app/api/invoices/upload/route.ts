@@ -46,5 +46,10 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  await prisma.event.update({
+    where: { id: eventId },
+    data: { budgetReviewStale: true },
+  });
+
   return NextResponse.json(invoice, { status: 201 });
 }

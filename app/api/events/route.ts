@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { EventUpsertBodySchema } from "@/lib/events-api-schema";
+import { ensureDefaultOrganization } from "@/lib/workspace";
 
 export async function GET() {
+  await ensureDefaultOrganization();
   const events = await prisma.event.findMany({
     include: { expenses: true, invoices: true },
     orderBy: { createdAt: "desc" },
@@ -18,6 +20,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
+  const org = await ensureDefaultOrganization();
   const d = parsed.data;
   const event = await prisma.event.create({
     data: {
@@ -28,6 +31,8 @@ export async function POST(req: NextRequest) {
       participants: d.participants,
       budget: d.budget ?? null,
       preferences: d.preferences ?? null,
+      organizationId: org.id,
+      planningStatus: "DRAFT",
     },
   });
 

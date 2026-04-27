@@ -27,6 +27,14 @@ import {
   Radar,
 } from "lucide-react";
 import { format } from "date-fns";
+import { actorHeaders } from "@/lib/browser-actor";
+import { parsePlanningConstraintsJson } from "@/lib/planning-constraints";
+import { useAssistantUi } from "@/components/assistant-ui-context";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ItinerarySource {
   label: string;
@@ -34,6 +42,7 @@ interface ItinerarySource {
 }
 
 interface ItineraryItem {
+  id?: string;
   time: string;
   type: "flight" | "hotel" | "activity" | "restaurant" | "other";
   name: string;
@@ -74,6 +83,8 @@ interface Event {
   budget: number | null;
   preferences: string | null;
   itinerary: string | null;
+  pendingPlanningNotes?: string | null;
+  planningConstraintsJson?: string | null;
 }
 
 const typeIcon = {
@@ -234,6 +245,7 @@ function parseToolCalls(text: string): string[] {
 
 export default function ItineraryPage() {
   const { id } = useParams<{ id: string }>();
+  const { setMobileRailOpen, requestRailComposerFocus, setRailCollapsed } = useAssistantUi();
   const [event, setEvent] = useState<Event | null>(null);
   const [itinerary, setItinerary] = useState<Itinerary | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -245,7 +257,7 @@ export default function ItineraryPage() {
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`/api/events/${id}`)
+    fetch(`/api/events/${id}`, { headers: { ...actorHeaders() } })
       .then((r) => r.json())
       .then((data: Event) => {
         setEvent(data);
@@ -277,7 +289,7 @@ export default function ItineraryPage() {
     try {
       const res = await fetch("/api/agents/planning", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...actorHeaders() },
         body: JSON.stringify({
           eventId: event.id,
           destination: event.destination,
@@ -332,11 +344,44 @@ export default function ItineraryPage() {
       setStreamFinished(true);
 
       if (!finalErr) {
-        const updated = await fetch(`/api/events/${id}`).then((r) => r.json());
+        const updated = await fetch(`/api/events/${id}`, {
+          headers: { ...actorHeaders() },
+        }).then((r) => r.json());
         if (updated.itinerary) {
           try {
             setItinerary(JSON.parse(updated.itinerary) as Itinerary);
             setExpandedDays(new Set([1]));
+            setEvent(updated as Event);
+            void (async () => {
+              try {
+                const fin = await fetch("/api/agents/finance", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", ...actorHeaders() },
+                  body: JSON.stringify({ eventId: id, action: "estimate" }),
+                });
+                if (!fin.ok || !fin.body) return;
+                const reader = fin.body.getReader();
+                const decoder = new TextDecoder();
+                let buf = "";
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  buf += decoder.decode(value, { stream: true });
+                }
+                const { streamError: finErr } = splitAgentStreamPayload(buf);
+                if (finErr) return;
+                await fetch(`/api/events/${id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json", ...actorHeaders() },
+                  body: JSON.stringify({
+                    lastFinanceReviewAt: new Date().toISOString(),
+                    budgetReviewStale: false,
+                  }),
+                });
+              } catch {
+                /* silent */
+              }
+            })();
           } catch (_e) {
             setStreamError(
               "The agent finished but the saved itinerary could not be loaded. Try refreshing the page."
@@ -376,6 +421,15 @@ export default function ItineraryPage() {
     );
   }
 
+  const structured = parsePlanningConstraintsJson(event.planningConstraintsJson);
+  const hasStructured =
+    structured != null &&
+    (structured.maxTotal != null ||
+      structured.savingsTargetPercent != null ||
+      structured.maxActivitySpend != null);
+  const hasQueuedPlanning =
+    Boolean(event.pendingPlanningNotes?.trim()) || hasStructured;
+
   return (
     <div>
       <Link
@@ -386,33 +440,105 @@ export default function ItineraryPage() {
         Back to event
       </Link>
 
+      {hasQueuedPlanning && (
+        <Alert className="mb-6 border-primary/30 bg-primary/5">
+          <Info className="h-4 w-4" />
+          <AlertDescription className="space-y-3">
+            <div>
+              <p className="font-medium text-foreground">
+                The next itinerary run will merge these inputs (and enforce them on save):
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-foreground/90">
+                {event.pendingPlanningNotes?.trim() && (
+                  <li>
+                    <span className="font-medium">Planner notes</span>
+                    <div className="mt-0.5 whitespace-pre-wrap text-muted-foreground">
+                      {event.pendingPlanningNotes}
+                    </div>
+                  </li>
+                )}
+                {structured?.maxTotal != null && (
+                  <li>Structured max line-item total: €{structured.maxTotal.toLocaleString()}</li>
+                )}
+                {structured?.savingsTargetPercent != null && (
+                  <li>Target savings vs approved budget: {structured.savingsTargetPercent}%</li>
+                )}
+                {structured?.maxActivitySpend != null && (
+                  <li>Activities subtotal cap: €{structured.maxActivitySpend.toLocaleString()}</li>
+                )}
+              </ul>
+            </div>
+            <Tooltip>
+              <TooltipTrigger
+                delay={260}
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 border-primary/40"
+                    onClick={() => {
+                      setRailCollapsed(false);
+                      if (
+                        typeof window !== "undefined" &&
+                        window.matchMedia("(max-width: 1023px)").matches
+                      ) {
+                        setMobileRailOpen(true);
+                      }
+                      requestRailComposerFocus();
+                    }}
+                  />
+                }
+              >
+                Open assistant
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Jump to the assistant with notes and caps in context
+              </TooltipContent>
+            </Tooltip>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Itinerary</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Itinerary</h1>
           <p className="text-muted-foreground mt-1">{event.name} · {event.destination}</p>
         </div>
-        <Button
-          onClick={generateItinerary}
-          disabled={generating}
-          className="bg-primary hover:bg-primary/90 gap-2"
-        >
-          {generating ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Planning...
-            </>
-          ) : itinerary ? (
-            <>
-              <RefreshCw className="w-4 h-4" />
-              Regenerate
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              Generate itinerary
-            </>
-          )}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            delay={280}
+            render={
+              <Button
+                onClick={generateItinerary}
+                disabled={generating}
+                className="bg-primary hover:bg-primary/90 gap-2"
+              />
+            }
+          >
+            {generating ? (
+              <>
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                Planning...
+              </>
+            ) : itinerary ? (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Regenerate
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Generate itinerary
+              </>
+            )}
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {itinerary
+              ? "Run the planning agent again (merges queued notes and structured caps)"
+              : "Generate a day-by-day itinerary from this event"}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Agent stream panel */}
@@ -575,7 +701,8 @@ export default function ItineraryPage() {
           </div>
           <h3 className="text-xl font-semibold text-foreground mb-2">No itinerary yet</h3>
           <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
-            Click "Generate itinerary" to let the Planning Agent build a complete day-by-day schedule with transport, accommodation, activities and dining.
+            Click &ldquo;Generate itinerary&rdquo; to let the Planning Agent build a complete day-by-day
+            schedule with transport, accommodation, activities and dining.
           </p>
           <Button
             onClick={generateItinerary}
