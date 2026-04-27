@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Event {
+  id           String    @id @default(cuid())
+  name         String
+  destination  String
+  startDate    DateTime
+  endDate      DateTime
+  participants Int
+  budget       Float?
+  preferences  String?
+  itinerary    String?
+  createdAt    DateTime  @default(now())
+  expenses     Expense[]
+  invoices     Invoice[]
+}
+
+model Expense {
+  id        String  @id @default(cuid())
+  eventId   String
+  category  String
+  label     String
+  estimated Float
+  confirmed Float?
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id        String    @id @default(cuid())
+  eventId   String
+  filename  String
+  vendor    String?
+  amount    Float?
+  category  String?
+  date      String?
+  rawData   String?
+  event     Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
