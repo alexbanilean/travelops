@@ -467,11 +467,12 @@ export default function LandingPage() {
           <p className="mx-auto mb-10 max-w-2xl text-lg text-white/90">
             Start your free trial today. No credit card required. Two AI agents ready to plan your next corporate event in minutes.
           </p>
-          <div className="flex flex-col justify-center gap-4 sm:flex-row">
+          <div className="flex flex-col justify-center gap-4 mb-5 sm:flex-row">
             <Link href="/dashboard/events/new" className="cursor-pointer">
               <Button
                 size="lg"
-                className="h-14 cursor-pointer gap-2 bg-white px-10 text-lg font-semibold text-foreground shadow-lg transition-colors duration-200 hover:bg-white/90"
+                variant="outline"
+                className="h-14 cursor-pointer gap-2 border-white/50 bg-transparent px-10 text-lg font-semibold text-foreground shadow-lg transition-colors duration-200 hover:bg-white/90"
               >
                 Start planning for free
                 <ArrowRight className="size-5" aria-hidden />
@@ -484,6 +485,35 @@ export default function LandingPage() {
                 className="h-14 cursor-pointer border-white/50 bg-transparent px-10 text-lg text-white transition-colors duration-200 hover:bg-white/15"
               >
                 View dashboard
+              </Button>
+            </Link>
+          </div>
+          <div className="flex flex-col justify-center gap-4 sm:flex-row">
+            <Link href="https://docs.google.com/document/d/1-U2oY3vzIODeQtJNxSOn2eH7mJrlOfIu9gW1nqFXxAU/edit?usp=sharing" className="cursor-pointer">
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-14 cursor-pointer border-white/50 bg-transparent px-10 text-lg text-white transition-colors duration-200 hover:bg-white/15"
+              >
+                Business foundation
+              </Button>
+            </Link>
+            <Link href="https://www.canva.com/design/DAHJQuVrCYk/4c9oQZQ1zg7M6SbUYrdXcQ/view" className="cursor-pointer">
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-14 cursor-pointer border-white/50 bg-transparent px-10 text-lg text-white transition-colors duration-200 hover:bg-white/15"
+              >
+                Pitch presentation
+              </Button>
+            </Link>
+            <Link href="https://github.com/alexbanilean/travelops" className="cursor-pointer">
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-14 cursor-pointer border-white/50 bg-transparent px-10 text-lg text-white transition-colors duration-200 hover:bg-white/15"
+              >
+                Git repo
               </Button>
             </Link>
           </div>
@@ -539,11 +569,7 @@ export default function LandingPage() {
           </div>
           <Separator className="my-6 bg-background/15" />
           <p className="text-center text-xs text-background/60">
-            © 2026 TravelOps. Planning + Finance agents via Google Gemini (set{" "}
-            <code className="rounded bg-background/15 px-1 font-mono text-[0.7rem]">
-              GOOGLE_GENERATIVE_AI_MODEL
-            </code>{" "}
-            if your free tier blocks a model).
+            © 2026 TravelOps. Planning + Finance agents via Google Gemini.
           </p>
         </div>
       </footer>
