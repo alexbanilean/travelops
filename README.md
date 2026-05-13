@@ -4,10 +4,12 @@
 
 TravelOps is an AI-powered corporate itinerary planner and expense tracker built with **Next.js**, **Google Gemini** (model configurable), and **two coordinated AI agents**.
 
-## Live Demo
+## Resources
 
-Landing page: `http://localhost:3000`  
-Dashboard: `http://localhost:3000/dashboard`
+Deployed app landing page: `https://travelops-drab.vercel.app/`
+Local landing page: `http://localhost:3000`
+Pitch: `https://canva.link/q69kbfz83bajcdy`
+Business foundation: `https://drive.google.com/file/d/1o74zMgTi76JJ-BVtHBCTq0HDmoRerMLj/view?usp=drivesdk`
 
 ## The Two AI Agents
 
