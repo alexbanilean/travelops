@@ -685,13 +685,13 @@ export default function LandingPage() {
 										Plan
 									</th>
 									<th className="px-4 py-3 text-center font-semibold text-white">
-										Monthly Users
+										Monthly Events
 									</th>
 									<th className="px-4 py-3 text-center font-semibold text-white">
 										Base Price
 									</th>
 									<th className="px-4 py-3 text-center font-semibold text-white">
-										Per User
+										Per Extra Event
 									</th>
 								</tr>
 							</thead>
@@ -699,21 +699,21 @@ export default function LandingPage() {
 								{[
 									{
 										name: "Pilot (Small)",
-										users: "50",
+										events: "50",
 										base: "1.500€",
-										perUser: "15€",
+										perExtraEvent: "50€",
 									},
 									{
 										name: "Pro (Medium)",
-										users: "200",
+										events: "200",
 										base: "4.000€",
-										perUser: "10€",
+										perExtraEvent: "40€",
 									},
 									{
 										name: "Max (Enterprise)",
-										users: "500+",
+										events: "500+",
 										base: "8.500€",
-										perUser: "Custom",
+										perExtraEvent: "Custom",
 									},
 								].map((plan, idx) => (
 									<tr
@@ -724,13 +724,13 @@ export default function LandingPage() {
 											{plan.name}
 										</td>
 										<td className="px-4 py-4 text-center text-white/90">
-											{plan.users}
+											{plan.events}
 										</td>
 										<td className="px-4 py-4 text-center text-white/90">
 											{plan.base}
 										</td>
 										<td className="px-4 py-4 text-center text-white/90">
-											{plan.perUser}
+											{plan.perExtraEvent}
 										</td>
 									</tr>
 								))}
